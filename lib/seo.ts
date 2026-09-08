@@ -4,6 +4,7 @@
 import { CATEGORIES, APPS, REPO_CATEGORIES, REPOS } from './data/apps';
 import { YT_GENRES, YT_CHANNELS } from './data/youtube';
 import { BRAND_SECTORS, BRANDS } from './data/brands';
+import { WEB3_CATEGORIES, WEB3_PROMPTS } from './data/web3';
 
 export const SITE_NAME = 'AQELVYN Studio';
 export const SLOGAN = 'From Prompt to Power';
@@ -58,7 +59,7 @@ export const KEYWORDS: string[] = [
 // Entity model — resolves a catalog key to a rich, SEO-friendly descriptor.
 // The actual paywalled prompt text is NEVER included here.
 // ---------------------------------------------------------------------------
-export type Kind = 'app' | 'repo' | 'yt' | 'brand';
+export type Kind = 'app' | 'repo' | 'yt' | 'brand' | 'web3';
 
 export interface SeoEntity {
   kind: Kind;
@@ -104,12 +105,21 @@ function brandEntity(b: any): SeoEntity {
     tags: b.features || [], color: s.color,
   };
 }
+function web3Entity(w: any): SeoEntity {
+  const c = WEB3_CATEGORIES[w.cat];
+  return {
+    kind: 'web3', id: w.id, name: w.name, emoji: w.emoji,
+    category: c.name, categoryEmoji: c.emoji, tagline: w.tagline || '',
+    tags: w.features || [], color: c.color,
+  };
+}
 
 export function resolveKey(kind: Kind, id: string): SeoEntity | null {
   if (kind === 'app') { const a = APPS.find((x: any) => x.id === id); return a ? appEntity(a) : null; }
   if (kind === 'repo') { const r = REPOS.find((x: any) => x.id === id); return r ? repoEntity(r) : null; }
   if (kind === 'yt') { const c = YT_CHANNELS.find((x: any) => x.id === id); return c ? ytEntity(c) : null; }
   if (kind === 'brand') { const b = BRANDS.find((x: any) => x.id === id); return b ? brandEntity(b) : null; }
+  if (kind === 'web3') { const w = WEB3_PROMPTS.find((x: any) => x.id === id); return w ? web3Entity(w) : null; }
   return null;
 }
 
@@ -119,6 +129,7 @@ export function listAll(): SeoEntity[] {
     ...REPOS.map(repoEntity),
     ...YT_CHANNELS.map(ytEntity),
     ...BRANDS.map(brandEntity),
+    ...WEB3_PROMPTS.map(web3Entity),
   ];
 }
 
@@ -127,6 +138,7 @@ export const kindLabel: Record<Kind, string> = {
   repo: 'Open-Source Repo Prompt',
   yt: 'YouTube Content Prompt',
   brand: 'Brand App Prompt',
+  web3: 'Free Web3 Build Prompt',
 };
 
 // ---------------------------------------------------------------------------
@@ -144,7 +156,8 @@ export function titleFor(e: SeoEntity): string {
   if (e.kind === 'app') return `${n} Clone & AI App Blueprint | Master Build Prompt`;
   if (e.kind === 'repo') return `${n} (${e.category}) — Master Build Prompt`;
   if (e.kind === 'yt') return `${n} YouTube Content Prompt & Growth System`;
-  return `${n} App — AI + Web3 Brand Blueprint Prompt`;
+  if (e.kind === 'brand') return `${n} App — AI + Web3 Brand Blueprint Prompt`;
+  return `${n} — Free Web3 Build Prompt (${e.category})`;
 }
 
 export function descriptionFor(e: SeoEntity): string {
@@ -157,7 +170,9 @@ export function descriptionFor(e: SeoEntity): string {
     return `${base} Rebuild & extend ${n} with built-in AI + native web3 — the definitive open-source master prompt for ${e.tagline || n}.`;
   if (e.kind === 'yt')
     return `${base} A complete content-generation system — viral ideas, scripts, formats & growth playbook for the ${n} channel.`;
-  return `${base} Build a full app for ${n} with built-in AI + native web3 wired to its exact use case.`;
+  if (e.kind === 'brand')
+    return `${base} Build a full app for ${n} with built-in AI + native web3 wired to its exact use case.`;
+  return `Free master build-prompt for a ${e.name} (${cat}). Build it from scratch with built-in AI + native web3, smart contracts, tokenomics & security — no payment required.`;
 }
 
 export function keywordsFor(e: SeoEntity): string[] {
@@ -168,6 +183,11 @@ export function keywordsFor(e: SeoEntity): string[] {
     `${e.category.toLowerCase()} app prompt`, `master build prompt`,
     'ai prompt', 'web3 app', 'blockchain app', 'prompt library',
   ];
+  if (e.kind === 'web3') {
+    k.push('free web3 prompts', 'defi app prompt', 'dex prompt', 'gamefi prompt',
+      'tokenization prompt', 'smart contract prompt', 'web3 build prompt',
+      'nft app prompt', 'dao prompt', 'crypto app prompt');
+  }
   return k.concat(e.tags.slice(0, 5).map((t) => `${t.toLowerCase()} prompt`));
 }
 

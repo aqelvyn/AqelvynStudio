@@ -43,8 +43,12 @@ const mem = new Map<string, UnlockRecord[]>();
 async function readAll(address: string): Promise<UnlockRecord[]> {
   const a = address.toLowerCase();
   if (KV_URL && KV_TOKEN) {
-    const raw = await kvCall(['GET', kvKey(a)]);
-    try { return raw ? (JSON.parse(raw) as UnlockRecord[]) : []; } catch { return []; }
+    try {
+      const raw = await kvCall(['GET', kvKey(a)]);
+      try { return raw ? (JSON.parse(raw) as UnlockRecord[]) : []; } catch { return []; }
+    } catch {
+      return mem.get(a) || [];
+    }
   }
   if (process.env.DISABLE_FILE_STORE !== '1') {
     try {
@@ -54,7 +58,7 @@ async function readAll(address: string): Promise<UnlockRecord[]> {
         .filter((k) => k.startsWith(prefix))
         .map((k) => rows[k]);
     } catch {
-      return [];
+      // file missing or unreadable — fall through to memory
     }
   }
   return mem.get(a) || [];
@@ -67,15 +71,23 @@ async function writeAll(address: string, records: UnlockRecord[]): Promise<void>
     return;
   }
   if (process.env.DISABLE_FILE_STORE !== '1') {
-    let rows: Record<string, UnlockRecord> = {};
-    try { rows = JSON.parse(await fs.readFile(FILE, 'utf-8')); } catch {}
-    // remove this address's existing entries, then re-add
-    const prefix = a + ':';
-    for (const k of Object.keys(rows)) if (k.startsWith(prefix)) delete rows[k];
-    for (const r of records) rows[`${a}:${r.key}`] = r;
-    await fs.mkdir(DATA_DIR, { recursive: true });
-    await fs.writeFile(FILE, JSON.stringify(rows, null, 2));
-    return;
+    try {
+      let rows: Record<string, UnlockRecord> = {};
+      try { rows = JSON.parse(await fs.readFile(FILE, 'utf-8')); } catch {}
+      // remove this address's existing entries, then re-add
+      const prefix = a + ':';
+      for (const k of Object.keys(rows)) if (k.startsWith(prefix)) delete rows[k];
+      for (const r of records) rows[`${a}:${r.key}`] = r;
+      await fs.mkdir(DATA_DIR, { recursive: true });
+      await fs.writeFile(FILE, JSON.stringify(rows, null, 2));
+      return;
+    } catch (e) {
+      // Serverless hosts (Vercel/Netlify/Cloudflare) have a read-only or
+      // ephemeral filesystem. Fall back to in-memory rather than failing the
+      // request — unlocks will last for the process lifetime, and configuring
+      // Upstash/Vercel KV gives durable persistence.
+      console.warn('[store] file store unavailable, using in-memory fallback:', (e as any)?.message || e);
+    }
   }
   mem.set(a, records);
 }

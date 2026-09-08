@@ -7,6 +7,11 @@ Brands, plus a Generator and AI Enhancer.
 > "From Prompt to Power" — one studio to mold any app, brand, or channel into a
 > complete, AI-powered, Web3-native product.
 
+Includes **100 free Web3 build prompts** ("⚡ Free Kit") covering DeFi, DEX &
+liquidity, GameFi, gamification, SocialFi, launchpads, asset/RWA tokenization
+(asset-to-token converters), NFT marketplaces, wallets & identity, and
+infrastructure — full master prompts, **no payment or wallet required**.
+
 ## Stack
 
 - **Frontend:** Next.js 14 (App Router) + React 18 + TypeScript.

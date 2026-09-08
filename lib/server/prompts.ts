@@ -6,6 +6,7 @@ import { CATEGORIES, REPO_CATEGORIES, APPS } from '../data/apps';
 import { YT_GENRES } from '../data/youtube';
 import { BRAND_SECTORS } from '../data/brands';
 import { CHAIN_NAMES } from '../constants';
+import { WEB3_CATEGORIES } from '../data/web3';
 
 export function buildMasterPrompt(app: any, opts: any = {}) {
   const cat = CATEGORIES[app.cat];
@@ -344,4 +345,81 @@ export function enhancePrompt(raw: string, chain: string, userWallet: string) {
   }
   out.push(`\n# ORIGINAL SPEC (source of truth)\n${text}`);
   return out.join('\n');
+}
+
+// ---------------- FREE Web3 build-kit prompts (no payment required) ----------------
+export function buildWeb3Prompt(e: any, opts: any = {}) {
+  const c = WEB3_CATEGORIES[e.cat];
+  const chain = opts.chain || 'cronos';
+  const chainName = CHAIN_NAMES[chain] || chain;
+  const wallet = (opts.wallet || '').toString().trim();
+  const L: string[] = [];
+  const hr = () => L.push('');
+
+  L.push(`You are a world-class senior Web3 architect, smart-contract engineer (Solidity/Rust), full-stack developer, and tokenomics designer. Build "${e.name}" — a production-grade ${c.name} application — from scratch, complete and deployable. Treat this spec as the single source of truth; wherever it is ambiguous, make the best product decision and document it.`);
+  hr();
+
+  L.push(`# 1. PRODUCT IDENTITY`);
+  L.push(`- Name: ${e.name}`);
+  L.push(`- Category: ${c.name} ${c.emoji}`);
+  L.push(`- One-liner: ${e.tagline}`);
+  L.push(`- Target audience: ${c.audience}`);
+  L.push(`- Tone: futuristic, premium, obsessively polished (dark UI with glassmorphism, neon accents, 60fps motion).`);
+  hr();
+
+  L.push(`# 2. CORE FEATURES`);
+  e.features.forEach((f: string) => L.push(`- ${f}`));
+  L.push(`- Onboarding: wallet connect (EVM via WalletConnect + injected; SVM via Phantom) or email/social login via account abstraction, plus a guided walkthrough.`);
+  L.push(`- Dashboards: live portfolio, activity feed, transaction history with on-chain proof, and in-app notifications (push + email).`);
+  hr();
+
+  L.push(`# 3. BUILT-IN AI — an AI copilot embedded in EVERY feature`);
+  L.push(`Provide a context-aware "AI Assistant" reachable from anywhere (floating action + ⌘K) that can EXECUTE on-chain actions, not just chat:`);
+  c.ai.forEach((x: string) => L.push(`- ${x}`));
+  L.push(`- Assistant capabilities: multi-step task execution, tool-use (call contract functions via a safe abstraction layer), memory of user context, and undo/confirm for irreversible actions.`);
+  L.push(`- Implementation: pluggable LLM provider (OpenAI-compatible) with streaming responses, usage metering, and per-user quotas.`);
+  hr();
+
+  L.push(`# 4. WEB3 ARCHITECTURE & SMART CONTRACTS`);
+  L.push(`Target network: ${chainName}. Design the contracts to be chain-agnostic and upgradeable where appropriate (proxy / diamond pattern), with a clear separation between core protocol and periphery:`);
+  e.contracts.forEach((x: string) => L.push(`- ${x}`));
+  L.push(`- Non-custodial by default; users own their assets, identity, and data. Private keys never touch your server.`);
+  L.push(`- Gasless UX where possible (meta-transactions / ERC-4337 bundler + paymaster).`);
+  L.push(`- On-chain proof & verifiability for key actions; off-chain data on IPFS/Arweave with on-chain content hashes.`);
+  L.push(`- Emit rich events + a public subgraph/indexer so every state change is queryable.`);
+  hr();
+
+  L.push(`# 5. TOKENOMICS & MONETIZATION`);
+  L.push(`Design a transparent token model with configurable splits, visible in an in-app dashboard:`);
+  c.rev.forEach((x: string) => L.push(`- ${x}`));
+  L.push(`- Revenue-share engine: on-chain escrow smart contract that auto-splits earnings per configured percentages; downloadable statements.`);
+  if (wallet) {
+    L.push(`- IMPORTANT: the treasury / revenue destination for ALL revenue, fees, and revenue-share must be the single wallet address: ${wallet}. Route every stream there — do not hard-code any other address.`);
+  } else {
+    L.push(`- Revenue destination: designate a single treasury wallet for ALL revenue streams (fees, splits, royalties). Make it a constructor/initializer argument so the deployer supplies it.`);
+  }
+  hr();
+
+  L.push(`# 6. SECURITY (non-negotiable)`);
+  L.push(`- Reentrancy guards (CEI pattern + ReentrancyGuard), overflow-checked math, and access-control (Ownable/RBAC).`);
+  L.push(`- Oracle safety: staleness checks, deviation bounds, and circuit breakers for extreme moves.`);
+  L.push(`- Rate limits, pause/emergency-withdraw, and a multisig (2-of-3) for admin keys.`);
+  L.push(`- Comprehensive test suite (unit + integration + fork tests) targeting 90%+ coverage, plus a third-party audit checklist and a public bug-bounty policy.`);
+  L.push(`- User-facing risk disclosures for every risky action (leverage, liquidation, impermanent loss).`);
+  hr();
+
+  L.push(`# 7. TECH STACK & DEPLOYMENT`);
+  L.push(`- Frontend: Next.js 14 + TypeScript + Tailwind, wagmi/viem + RainbowKit (EVM) and/or @solana/web3.js + wallet adapter.`);
+  L.push(`- Contracts: Solidity (Foundry/Hardhat) for EVM; Rust/Anchor for SVM.`);
+  L.push(`- Indexing: The Graph / a custom indexer; RPC via a provider with fallbacks.`);
+  L.push(`- Deploy with a script that REFUSES to run if the treasury wallet is unset or malformed.`);
+  L.push(`- Ship as PWA + responsive; optional iOS/Android wrappers (Capacitor/React Native).`);
+  hr();
+
+  L.push(`# 8. LAUNCH & SUCCESS METRICS`);
+  L.push(`- Ship an MVP within 4 weeks: core flow + one "wow" moment, then iterate weekly.`);
+  L.push(`- Track: active users, volume, retention (D7/D30), TVL, and protocol revenue — with a public analytics dashboard.`);
+  L.push(`- Growth loops: referral rewards, token incentives, and community (Discord/quests).`);
+
+  return L.join('\n');
 }

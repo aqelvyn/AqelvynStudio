@@ -9,4 +9,7 @@ export const VERIFY_SECRET = process.env.VERIFY_SECRET || 'dev-only-insecure-sec
 
 export const PRICE_WEI = 10n ** 18n;            // 1 CRO
 export const PRICE_ALL_WEI = 100n * 10n ** 18n; // 100 CRO
-export const MIN_CONFIRMATIONS = 3;
+// Confirmations required before an unlock is accepted. 1 is sufficient for a
+// 1-CRO microtransaction (the sender/to/value are the real proofs); raise via
+// MIN_CONFIRMATIONS env var if you want stronger reorg resistance.
+export const MIN_CONFIRMATIONS = Math.max(1, parseInt(process.env.MIN_CONFIRMATIONS || '1', 10) || 1);

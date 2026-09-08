@@ -2,16 +2,18 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { ConnectButton } from '@rainbow-me/rainbowkit';
-import { useAccount, useChainId, useSwitchChain, useSendTransaction, usePublicClient, useSignMessage } from 'wagmi';
+import { useAccount, useChainId, useSwitchChain, useSendTransaction, useSignMessage } from 'wagmi';
 
 import { cronos } from '@/lib/chains';
 import { CATEGORIES, APPS, REPO_CATEGORIES, REPOS } from '@/lib/data/apps';
 import { YT_GENRES, YT_CHANNELS } from '@/lib/data/youtube';
 import { BRAND_SECTORS, BRANDS } from '@/lib/data/brands';
+import { WEB3_CATEGORIES, WEB3_PROMPTS } from '@/lib/data/web3';
 import { CHAIN_NAMES, EXTRAS } from '@/lib/constants';
 
 const TABS = [
   { id: 'library', label: '📚 Library' },
+  { id: 'free', label: '⚡ Free Kit' },
   { id: 'repos', label: '📦 Open Source' },
   { id: 'youtube', label: '🎬 YouTube' },
   { id: 'brands', label: '🏢 Brands' },
@@ -48,6 +50,7 @@ interface ModalState {
   chips: string[];
   prompt: string | null;
   loading: boolean;
+  free?: boolean;
 }
 
 export default function Studio() {
@@ -55,6 +58,7 @@ export default function Studio() {
   const [tab, setTab] = useState('library');
   const [splash, setSplash] = useState(true);
   const [infoOpen, setInfoOpen] = useState(false);
+  const [menuOpen, setMenuOpen] = useState(false);
   const [toast, setToast] = useState('');
   const [query, setQuery] = useState('');
   const [cat, setCat] = useState('all');
@@ -80,7 +84,6 @@ export default function Studio() {
   const chainId = useChainId();
   const { switchChainAsync } = useSwitchChain();
   const { sendTransactionAsync } = useSendTransaction();
-  const publicClient = usePublicClient();
   const { signMessageAsync } = useSignMessage();
 
   const showToast = useCallback((msg: string) => {
@@ -173,35 +176,40 @@ export default function Studio() {
     }
     const payRes = await fetch('/api/payment').then((r) => r.json());
     try {
-      const hash = await sendTransactionAsync({ to: payRes.address as `0x${string}`, value: priceWei });
-      if (publicClient) await publicClient.waitForTransactionReceipt({ hash });
+      // Force the tx onto Cronos (chainId) and return the hash immediately —
+      // the server polls confirmations on its own, so we never block here.
+      const hash = await sendTransactionAsync({ to: payRes.address as `0x${string}`, value: priceWei, chainId: cronos.id });
       return hash;
     } catch (e: any) {
       if (e?.message?.includes('rejected') || e?.name === 'UserRejectedRequestError' || e?.code === 4001) {
         showToast('⚠️ Transaction rejected — no CRO charged');
       } else {
-        showToast('⚠️ Payment failed');
+        showToast('⚠️ Payment failed: ' + ((e?.shortMessage || e?.message) || 'unknown error'));
       }
       return null;
     }
-  }, [address, chainId, switchChainAsync, sendTransactionAsync, publicClient, showToast]);
+  }, [address, chainId, switchChainAsync, sendTransactionAsync, showToast]);
 
-  const verify = useCallback(async (txHash: string, key: string): Promise<{ ok: boolean }> => {
-    for (let i = 0; i < 10; i++) {
+  // Poll /api/verify until the tx is confirmed (or a definitive error).
+  const verify = useCallback(async (txHash: string, key: string): Promise<{ ok: boolean; error?: string }> => {
+    const definitive = new Set(['sender mismatch', 'not treasury', 'insufficient payment']);
+    for (let i = 0; i < 40; i++) {
+      let d: any = { pending: true };
       try {
         const r = await fetch('/api/verify', {
           method: 'POST', headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ txHash, key, address }),
         });
-        const d = await r.json();
-        if (d.verified) return { ok: true };
-        if (!d.pending) return { ok: false };
+        d = await r.json();
       } catch {
-        return { ok: false };
+        d = { pending: true }; // network error -> keep polling
       }
-      await new Promise((r) => setTimeout(r, 4000));
+      if (d.verified) return { ok: true };
+      if (d.error && definitive.has(d.error)) return { ok: false, error: d.error };
+      // otherwise (pending, not mined, rpc error, rate limited) -> keep trying
+      await new Promise((r) => setTimeout(r, 3000));
     }
-    return { ok: false };
+    return { ok: false, error: 'timeout' };
   }, [address]);
 
   // ---- load a gated prompt from the server ----
@@ -223,6 +231,24 @@ export default function Studio() {
     }
   }, [authedFetch, chain, showToast]);
 
+  // ---- free prompts (no payment, no wallet) ----
+  const loadFreePrompt = useCallback(async (id: string, wallet: string) => {
+    setModal((m) => (m ? { ...m, loading: true } : m));
+    try {
+      const qs = `?chain=${encodeURIComponent(chain)}&wallet=${encodeURIComponent(wallet)}`;
+      const res = await fetch(`/api/free/${id}${qs}`);
+      const d = await res.json();
+      setModal((m) => (m ? { ...m, prompt: d.prompt || null, loading: false } : m));
+    } catch {
+      setModal((m) => (m ? { ...m, prompt: null, loading: false } : m));
+    }
+  }, [chain]);
+
+  const openFreePrompt = useCallback((w: any) => {
+    const c = WEB3_CATEGORIES[w.cat];
+    setModal({ key: 'free:' + w.id, emoji: w.emoji, name: w.name, tag: c.name + ' — free prompt', chips: [c.name, ...w.features.slice(0, 3)], prompt: null, loading: false, free: true });
+  }, []);
+
   const unlockKey = useCallback(async (key: string) => {
     setPaying(true);
     try {
@@ -235,7 +261,7 @@ export default function Studio() {
         showToast('🔓 Unlocked (verified on-chain)');
         return true;
       }
-      showToast('⚠️ Payment could not be verified on-chain');
+      showToast('⚠️ ' + (v.error && v.error !== 'timeout' ? `Payment not accepted: ${v.error}` : 'Confirming payment on-chain… try again in a moment'));
       return false;
     } finally {
       setPaying(false);
@@ -254,7 +280,7 @@ export default function Studio() {
         showToast('✅ All prompts unlocked (verified on-chain)');
         return true;
       }
-      showToast('⚠️ Payment could not be verified on-chain');
+      showToast('⚠️ ' + (v.error && v.error !== 'timeout' ? `Payment not accepted: ${v.error}` : 'Confirming payment on-chain… try again in a moment'));
       return false;
     } finally {
       setPaying(false);
@@ -262,22 +288,24 @@ export default function Studio() {
   }, [pay, verify, showToast]);
 
   // ---- per-attempt charged generation (generator + enhancer) ----
-  const chargeAndCall = useCallback(async (url: string, extraBody: any): Promise<{ ok: boolean; prompt?: string }> => {
+  const chargeAndCall = useCallback(async (url: string, extraBody: any): Promise<{ ok: boolean; prompt?: string; error?: string }> => {
     const payRes = await fetch('/api/payment').then((r) => r.json());
     const txHash = await pay(BigInt(payRes.priceWei));
-    if (!txHash) return { ok: false };
-    for (let i = 0; i < 10; i++) {
+    if (!txHash) return { ok: false, error: 'payment' };
+    const definitive = new Set(['sender mismatch', 'not treasury', 'insufficient payment']);
+    for (let i = 0; i < 40; i++) {
+      let d: any = { pending: true };
       try {
         const res = await authedFetch(url, { method: 'POST', body: JSON.stringify({ txHash, ...extraBody }) });
-        const d = await res.json();
+        d = await res.json();
         if (res.ok && d.prompt) return { ok: true, prompt: d.prompt };
-        if (!d.pending) return { ok: false };
       } catch {
-        return { ok: false };
+        d = { pending: true };
       }
-      await new Promise((r) => setTimeout(r, 4000));
+      if (d.error && definitive.has(d.error)) return { ok: false, error: d.error };
+      await new Promise((r) => setTimeout(r, 3000));
     }
-    return { ok: false };
+    return { ok: false, error: 'timeout' };
   }, [pay, authedFetch]);
 
   // ---- open a prompt modal (metadata only; content fetched server-side) ----
@@ -285,12 +313,16 @@ export default function Studio() {
     setModal({ key, emoji, name, tag, chips, prompt: null, loading: false });
   }, []);
 
-  // when a modal opens on an already-unlocked key, load the prompt
+  // when a modal opens on an already-unlocked key (or a free prompt), load it
   useEffect(() => {
-    if (modal && modal.prompt === null && !modal.loading && isUnlocked(modal.key)) {
-      loadPrompt(modal.key, userWallet.trim());
+    if (modal && modal.prompt === null && !modal.loading) {
+      if (modal.free) {
+        loadFreePrompt(modal.key.slice(5), userWallet.trim());
+      } else if (isUnlocked(modal.key)) {
+        loadPrompt(modal.key, userWallet.trim());
+      }
     }
-  }, [modal, isUnlocked, loadPrompt, userWallet]);
+  }, [modal, isUnlocked, loadPrompt, loadFreePrompt, userWallet]);
 
   const saveToVault = useCallback((entry: any) => {
     setVault((v) => {
@@ -329,14 +361,22 @@ export default function Studio() {
     return list;
   }, [cat, query]);
 
+  const freeList = useMemo(() => {
+    const q = query.trim().toLowerCase();
+    let list = WEB3_PROMPTS.filter((p) => cat === 'all' || p.cat === cat);
+    if (q) list = list.filter((p) => p.name.toLowerCase().includes(q) || p.tagline.toLowerCase().includes(q) || p.features.some((f) => f.toLowerCase().includes(q)));
+    return list;
+  }, [cat, query]);
+
   const catDefs = useMemo(() => {
+    if (tab === 'free') return [['all', 'All Free Prompts', '⚡', WEB3_PROMPTS.length], ...Object.entries(WEB3_CATEGORIES).map(([id, c]) => [id, c.name, c.emoji, WEB3_PROMPTS.filter((p) => p.cat === id).length] as [string, string, string, number])];
     if (tab === 'repos') return [['all', 'All Repos', '🧩', REPOS.length], ...Object.entries(REPO_CATEGORIES).map(([id, c]) => [id, c.name, c.emoji, REPOS.filter((r) => r.cat === id).length] as [string, string, string, number])];
     if (tab === 'youtube') return [['all', 'All Channels', '🎬', YT_CHANNELS.length], ...YT_GENRES.map((g) => [g.id, g.name, g.emoji, YT_CHANNELS.filter((c) => c.genre === g.id).length] as [string, string, string, number])];
     if (tab === 'brands') return [['all', 'All Brands', '🏢', BRANDS.length], ...Object.entries(BRAND_SECTORS).map(([id, s]) => [id, s.name, s.emoji, BRANDS.filter((b) => b.sector === id).length] as [string, string, string, number])];
     return [['all', 'All Apps', '🧩', APPS.length], ...Object.entries(CATEGORIES).map(([id, c]) => [id, c.name, c.emoji, APPS.filter((a) => a.cat === id).length] as [string, string, string, number])];
   }, [tab]);
 
-  const switchTab = (id: string) => { setTab(id); setCat('all'); setQuery(''); };
+  const switchTab = (id: string) => { setTab(id); setCat('all'); setQuery(''); setMenuOpen(false); };
 
   const onWalletInput = useCallback((v: string) => {
     setUserWallet(v);
@@ -344,11 +384,13 @@ export default function Studio() {
     if (walletDebounce.current) clearTimeout(walletDebounce.current);
     walletDebounce.current = setTimeout(() => {
       setModal((m) => {
-        if (m && isUnlocked(m.key)) loadPrompt(m.key, v.trim());
+        if (!m) return m;
+        if (m.free) loadFreePrompt(m.key.slice(5), v.trim());
+        else if (isUnlocked(m.key)) loadPrompt(m.key, v.trim());
         return m;
       });
     }, 500);
-  }, [isUnlocked, loadPrompt]);
+  }, [isUnlocked, loadPrompt, loadFreePrompt]);
 
   return (
     <>
@@ -371,15 +413,20 @@ export default function Studio() {
 
       {/* topbar */}
       <header className="topbar">
+        <button className="menu-btn" aria-label="Menu" onClick={() => setMenuOpen(true)}>
+          <svg viewBox="0 0 24 24" width="24" height="24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round"><path d="M3 6h18M3 12h18M3 18h18" /></svg>
+        </button>
         <div className="brand">
           <span className="brand-logo"><img src="/logo-main.png" alt="AQELVYN logo" /></span>
           <span className="brand-name">AQELVYN</span>
         </div>
         <div style={{ flex: 1 }} />
-        <ConnectButton showBalance={false} accountStatus="address" chainStatus="icon" />
+        <div className="connect-wrap">
+          <ConnectButton showBalance={false} accountStatus="address" chainStatus="icon" />
+        </div>
       </header>
 
-      {/* tabs */}
+      {/* tabs (desktop) */}
       <nav className="tabs">
         {TABS.map((t) => (
           <button key={t.id} className={`tab ${tab === t.id ? 'active' : ''}`} onClick={() => switchTab(t.id)}>
@@ -389,8 +436,41 @@ export default function Studio() {
         ))}
       </nav>
 
+      {/* hamburger drawer (mobile) */}
+      <div className={`drawer-backdrop ${menuOpen ? 'open' : ''}`} onClick={() => setMenuOpen(false)} />
+      <aside className={`drawer ${menuOpen ? 'open' : ''}`}>
+        <div className="drawer-head">
+          <span className="brand-name">AQELVYN</span>
+          <button className="btn drawer-close" onClick={() => setMenuOpen(false)} aria-label="Close">×</button>
+        </div>
+        <nav className="drawer-tabs">
+          {TABS.map((t) => (
+            <button key={t.id} className={`drawer-tab ${tab === t.id ? 'active' : ''}`} onClick={() => switchTab(t.id)}>
+              <span>{t.label}</span>
+              {t.id === 'vault' && vault.length > 0 && <span className="pill">{vault.length}</span>}
+            </button>
+          ))}
+        </nav>
+        {['library', 'free', 'repos', 'youtube', 'brands'].includes(tab) && (
+          <div className="drawer-cats">
+            <div className="drawer-cats-title">Categories</div>
+            {catDefs.map(([id, name, emoji, count]) => (
+              <button
+                key={id}
+                className={`drawer-cat ${cat === id ? 'active' : ''}`}
+                onClick={() => { setCat(id as string); setMenuOpen(false); }}
+              >
+                <span>{emoji}</span>
+                <span>{name}</span>
+                <span className="cc">{count}</span>
+              </button>
+            ))}
+          </div>
+        )}
+      </aside>
+
       <main>
-        {['library', 'repos', 'youtube', 'brands'].includes(tab) && (
+        {['library', 'free', 'repos', 'youtube', 'brands'].includes(tab) && (
           <div className="layout">
             <aside className="cats">
               {catDefs.map(([id, name, emoji, count]) => (
@@ -404,12 +484,12 @@ export default function Studio() {
               <div style={{ display: 'flex', gap: 12, alignItems: 'center', marginBottom: 14 }}>
                 <input
                   style={{ flex: 1, background: 'var(--panel)', border: '1px solid var(--line)', borderRadius: 12, padding: '9px 14px', color: 'var(--text)' }}
-                  placeholder={tab === 'library' ? 'Search apps…' : tab === 'repos' ? 'Search repos…' : tab === 'youtube' ? 'Search channels…' : 'Search brands…'}
+                  placeholder={tab === 'library' ? 'Search apps…' : tab === 'free' ? 'Search free web3 prompts…' : tab === 'repos' ? 'Search repos…' : tab === 'youtube' ? 'Search channels…' : 'Search brands…'}
                   value={query}
                   onChange={(e) => setQuery(e.target.value)}
                 />
                 <span className="meta" style={{ color: 'var(--dim)', fontSize: 13 }}>
-                  {tab === 'library' ? appList.length + ' apps' : tab === 'repos' ? repoList.length + ' repos' : tab === 'youtube' ? ytList.length + ' channels' : brandList.length + ' brands'}
+                  {tab === 'library' ? appList.length + ' apps' : tab === 'free' ? freeList.length + ' free prompts' : tab === 'repos' ? repoList.length + ' repos' : tab === 'youtube' ? ytList.length + ' channels' : brandList.length + ' brands'}
                 </span>
               </div>
 
@@ -457,6 +537,18 @@ export default function Studio() {
                       {!isUnlocked('brand:' + b.id) && <span className="lock">🔒</span>}
                       <div className="c-top"><span className="c-emoji" style={{ color: s.color }}>{b.emoji}</span><div><h3>{esc(b.name)}</h3><div className="c-sector">{esc(s.name)}</div></div></div>
                       <p className="c-tagline">{esc(b.tagline)}</p>
+                    </div>
+                  );
+                })}
+
+                {tab === 'free' && freeList.map((w) => {
+                  const c = WEB3_CATEGORIES[w.cat];
+                  return (
+                    <div key={w.id} className="card free-card" onClick={() => openFreePrompt(w)}>
+                      <span className="free-badge">FREE</span>
+                      <div className="c-top"><span className="c-emoji" style={{ color: c.color }}>{w.emoji}</span><div><h3>{esc(w.name)}</h3><div className="c-cat">{esc(c.name)}</div></div></div>
+                      <p className="c-tag">{esc(w.tagline)}</p>
+                      <div className="c-feats">{w.features.slice(0, 3).map((f) => <span key={f}>{esc(f)}</span>)}</div>
                     </div>
                   );
                 })}
@@ -560,7 +652,7 @@ export default function Studio() {
               <div style={{ fontSize: 13, color: 'var(--muted)', marginBottom: 10 }}>{esc(modal.tag)}</div>
               <div className="chips">{modal.chips.map((c, i) => <span key={i}>{esc(c)}</span>)}</div>
 
-              {!isUnlocked(modal.key) ? (
+              {!modal.free && !isUnlocked(modal.key) ? (
                 <div className="paywall">
                   <h3>🔒 This prompt is locked</h3>
                   <p>Pay <b>1 CRO</b> on Cronos to unlock this master build-prompt — verified on-chain before it opens.</p>

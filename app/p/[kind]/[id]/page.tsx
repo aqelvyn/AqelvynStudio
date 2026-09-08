@@ -4,6 +4,8 @@ import {
   resolveKey, listAll, titleFor, descriptionFor, keywordsFor,
   entityJsonLd, urlFor, kindLabel, SITE_NAME, SITE_URL, Kind,
 } from '@/lib/seo';
+import { WEB3_PROMPTS } from '@/lib/data/web3';
+import { buildWeb3Prompt } from '@/lib/server/prompts';
 
 export function generateStaticParams() {
   return listAll().map((e) => ({ kind: e.kind, id: e.id }));
@@ -31,7 +33,12 @@ export default function PromptPage({ params }: { params: { kind: string; id: str
   const e = resolveKey(params.kind as Kind, params.id);
   if (!e) notFound();
 
-  const bg = 'rgba(4,20,20,0.92)';
+  // Free web3 prompts expose their full prompt text publicly (no payment).
+  const isFree = params.kind === 'web3';
+  const freePrompt = isFree
+    ? buildWeb3Prompt(WEB3_PROMPTS.find((w) => w.id === params.id), { chain: 'cronos', wallet: '' })
+    : null;
+
   const panel = 'rgba(255,255,255,0.04)';
   const text = '#e8f6f4';
   const dim = '#8ab6b0';
@@ -55,7 +62,7 @@ export default function PromptPage({ params }: { params: { kind: string; id: str
           {kindLabel[e.kind]} · {e.category}
         </p>
         <h1 style={{ fontSize: 40, lineHeight: 1.1, margin: '8px 0 12px', fontWeight: 800 }}>
-          {e.name} — Master Build Prompt
+          {e.name} — {isFree ? 'Free Web3 Build Prompt' : 'Master Build Prompt'}
         </h1>
         <p style={{ fontSize: 18, color: dim, lineHeight: 1.5, margin: '0 0 20px' }}>
           {descriptionFor(e)}
@@ -69,13 +76,31 @@ export default function PromptPage({ params }: { params: { kind: string; id: str
           ))}
         </div>
 
-        <a href="/" style={{ display: 'inline-flex', alignItems: 'center', gap: 8, background: accent, color: '#041414', fontWeight: 700, padding: '12px 20px', borderRadius: 12, textDecoration: 'none' }}>
-          🔓 Unlock this prompt in {SITE_NAME} →
-        </a>
+        {isFree && freePrompt ? (
+          <>
+            <div style={{ background: 'rgba(255,255,255,0.03)', border: '1px solid rgba(255,255,255,0.1)', borderRadius: 16, padding: '20px 22px', marginBottom: 20 }}>
+              <div style={{ color: orange, fontWeight: 700, letterSpacing: '0.08em', fontSize: 12, marginBottom: 14, textTransform: 'uppercase' }}>
+                ⚡ Free prompt — copy & paste into ChatGPT, Claude or Gemini
+              </div>
+              <pre style={{ whiteSpace: 'pre-wrap', wordBreak: 'break-word', fontFamily: 'ui-monospace, SFMono-Regular, Menlo, monospace', fontSize: 13.5, lineHeight: 1.6, color: text, margin: 0 }}>
+                {freePrompt}
+              </pre>
+            </div>
+            <a href="/" style={{ display: 'inline-flex', alignItems: 'center', gap: 8, background: accent, color: '#041414', fontWeight: 700, padding: '12px 20px', borderRadius: 12, textDecoration: 'none' }}>
+              ⚡ Get all 100 free web3 prompts in {SITE_NAME} →
+            </a>
+          </>
+        ) : (
+          <>
+            <a href="/" style={{ display: 'inline-flex', alignItems: 'center', gap: 8, background: accent, color: '#041414', fontWeight: 700, padding: '12px 20px', borderRadius: 12, textDecoration: 'none' }}>
+              🔓 Unlock this prompt in {SITE_NAME} →
+            </a>
 
-        <p style={{ color: dim, fontSize: 13, marginTop: 24 }}>
-          Includes built-in AI, native web3, monetization & revenue-share, and a complete deployable spec. Unlock for 1 CRO (or unlock all 615+ prompts for 100 CRO).
-        </p>
+            <p style={{ color: dim, fontSize: 13, marginTop: 24 }}>
+              Includes built-in AI, native web3, monetization & revenue-share, and a complete deployable spec. Unlock for 1 CRO (or unlock all 615+ prompts for 100 CRO).
+            </p>
+          </>
+        )}
       </main>
     </div>
   );
