@@ -1,0 +1,11 @@
+# Netlify config for AQELVYN Studio (Next.js).
+# Netlify auto-installs the Next.js runtime plugin; this pins the build + publish.
+[build]
+  command = "npm run build"
+  publish = ".next"
+
+[build.environment]
+  NODE_VERSION = "20"
+
+[[plugins]]
+  package = "@netlify/plugin-nextjs"
