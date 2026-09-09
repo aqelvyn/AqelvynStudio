@@ -23,9 +23,9 @@ export function generateMetadata({ params }: { params: { kind: string; id: strin
     alternates: { canonical: urlFor(e) },
     openGraph: {
       title, description: desc, url: urlFor(e), type: 'website',
-      siteName: SITE_NAME, images: [{ url: '/og-banner.jpg', width: 1200, height: 630, alt: title }],
+      siteName: SITE_NAME, images: [{ url: `${SITE_URL}/api/og/${e.kind}/${e.id}`, width: 1200, height: 630, alt: title }],
     },
-    twitter: { card: 'summary_large_image', title, description: desc, images: ['/og-banner.jpg'] },
+    twitter: { card: 'summary_large_image', title, description: desc, images: [`${SITE_URL}/api/og/${e.kind}/${e.id}`] },
   };
 }
 

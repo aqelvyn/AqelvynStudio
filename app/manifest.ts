@@ -15,8 +15,10 @@ export default function manifest(): MetadataRoute.Manifest {
     orientation: 'any',
     categories: ['developer tools', 'productivity', 'artificial intelligence'],
     icons: [
+      { src: '/favicon.ico', sizes: 'any', type: 'image/x-icon' },
+      { src: '/icon-512.png', sizes: '512x512', type: 'image/png' },
       { src: '/logo-main.png', sizes: '256x256', type: 'image/png' },
-      { src: '/logo-splash.png', sizes: '512x512', type: 'image/png' },
+      { src: '/apple-touch-icon.png', sizes: '180x180', type: 'image/png' },
     ],
   };
 }

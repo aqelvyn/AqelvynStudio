@@ -27,7 +27,7 @@ export const metadata: Metadata = {
     title: `${SITE_NAME} — AI Prompts, Web3 App Builder & Prompt Library`,
     description: DESCRIPTION,
     locale: 'en_US',
-    images: [{ url: '/og-banner.jpg', width: 1200, height: 630, alt: `${SITE_NAME} — ${TAGLINE}` }],
+    images: [{ url: '/og-banner.png', width: 1200, height: 630, alt: `${SITE_NAME} — ${TAGLINE}` }],
   },
   twitter: {
     card: 'summary_large_image',
@@ -35,7 +35,7 @@ export const metadata: Metadata = {
     creator: '@aqelvyn',
     title: `${SITE_NAME} — AI Prompts, Web3 App Builder & Prompt Library`,
     description: DESCRIPTION,
-    images: ['/og-banner.jpg'],
+    images: ['/og-banner.png'],
   },
   robots: {
     index: true,
@@ -47,6 +47,14 @@ export const metadata: Metadata = {
       'max-snippet': -1,
       'max-video-preview': -1,
     },
+  },
+  icons: {
+    icon: [
+      { url: '/favicon.ico', sizes: 'any' },
+      { url: '/icon-512.png', type: 'image/png', sizes: '512x512' },
+    ],
+    shortcut: '/favicon.ico',
+    apple: [{ url: '/apple-touch-icon.png', sizes: '180x180', type: 'image/png' }],
   },
 };
 

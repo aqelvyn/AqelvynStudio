@@ -8,8 +8,13 @@ import { WEB3_CATEGORIES, WEB3_PROMPTS } from './data/web3';
 
 export const SITE_NAME = 'AQELVYN Studio';
 export const SLOGAN = 'From Prompt to Power';
+// Canonical site URL. Resolution order:
+//   1. NEXT_PUBLIC_SITE_URL (set explicitly, e.g. for a custom domain)
+//   2. Vercel's auto-injected VERCEL_URL (so every deploy "just works")
+//   3. fallback default
+const VERCEL_AUTO = process.env.VERCEL_URL ? `https://${process.env.VERCEL_URL}` : '';
 export const SITE_URL =
-  process.env.NEXT_PUBLIC_SITE_URL || 'https://aqelvyn.studio';
+  process.env.NEXT_PUBLIC_SITE_URL || VERCEL_AUTO || 'https://aqelvyn.studio';
 export const TAGLINE =
   'One studio to mold any app, brand, or channel into a complete, AI-powered, Web3-native product — built, owned & scaled by you.';
 export const DESCRIPTION =
@@ -221,7 +226,16 @@ export function organizationJsonLd(): object {
     logo: `${SITE_URL}/logo-main.png`,
     slogan: SLOGAN,
     description: DESCRIPTION,
-    sameAs: ['https://discord.gg/WUxR2w8zM7'],
+    sameAs: [
+      'https://discord.gg/WUxR2w8zM7',
+      'https://twitter.com/aqelvyn',
+      'https://x.com/aqelvyn',
+      'https://www.instagram.com/aqelvyn',
+      'https://www.tiktok.com/@aqelvyn',
+      'https://www.facebook.com/aqelvyn',
+      'https://www.youtube.com/@aqelvyn',
+      'https://www.linkedin.com/company/aqelvyn',
+    ],
   };
 }
 
