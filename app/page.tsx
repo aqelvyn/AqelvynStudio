@@ -42,6 +42,27 @@ function cacheSession(address: string, token: string) {
   try { localStorage.setItem('aq_session', JSON.stringify({ address: address.toLowerCase(), token, exp: Date.now() + SESSION_TTL })); } catch {}
 }
 
+// ---- unlock receipts (blockchain-backed, survives serverless cold starts) ----
+// The on-chain transaction is the durable proof of payment. We keep each paid
+// tx hash locally and re-verify it against the chain on every load, so unlocks
+// survive page reloads AND serverless restarts with no database required.
+interface Receipt { key: string; txHash: string; }
+function readReceipts(): Receipt[] {
+  try {
+    const raw = localStorage.getItem('aq_receipts');
+    if (!raw) return [];
+    const a = JSON.parse(raw);
+    return Array.isArray(a) ? a : [];
+  } catch { return []; }
+}
+function saveReceipt(key: string, txHash: string) {
+  try {
+    const list = readReceipts().filter((r) => r.key !== key);
+    list.push({ key, txHash });
+    localStorage.setItem('aq_receipts', JSON.stringify(list));
+  } catch {}
+}
+
 interface ModalState {
   key: string;
   emoji: string;
@@ -108,21 +129,36 @@ export default function Studio() {
   useEffect(() => {
     if (!address) { setUnlockedKeys(new Set()); setUnlockedAll(false); return; }
     (async () => {
+      const keys = new Set<string>();
+      let all = false;
+      // 1) ledger (fast path; works when KV is configured)
       try {
         const r = await fetch(`/api/unlocks?address=${address}`);
         const d = await r.json();
-        const keys = new Set<string>();
-        let all = false;
         for (const u of d.unlocks || []) {
           if (u.key === 'unlock-all') all = true;
           else keys.add(u.key);
         }
-        setUnlockedKeys(keys);
-        setUnlockedAll(all);
-      } catch {
-        setUnlockedKeys(new Set());
-        setUnlockedAll(false);
+      } catch {}
+      // 2) blockchain-backed receipts (durable proof of payment — survives
+      //    serverless restarts; re-verified on-chain every load)
+      const receipts = readReceipts();
+      if (receipts.length) {
+        try {
+          const r = await fetch('/api/unlocks', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ address, receipts }),
+          });
+          const d = await r.json();
+          for (const u of d.unlocks || []) {
+            if (u.key === 'unlock-all') all = true;
+            else keys.add(u.key);
+          }
+        } catch {}
       }
+      setUnlockedKeys(keys);
+      setUnlockedAll(all);
     })();
   }, [address]);
 
@@ -216,8 +252,11 @@ export default function Studio() {
   const loadPrompt = useCallback(async (key: string, wallet: string) => {
     setModal((m) => (m ? { ...m, loading: true } : m));
     try {
+      // Attach the unlock receipt(s) so the server can re-verify payment
+      // on-chain even if its (ephemeral) ledger has no record of the unlock.
+      const receipts = readReceipts();
       const res = await authedFetch('/api/prompt', {
-        method: 'POST', body: JSON.stringify({ key, wallet, chain }),
+        method: 'POST', body: JSON.stringify({ key, wallet, chain, receipts }),
       });
       const d = await res.json();
       if (res.ok && d.prompt) {
@@ -252,40 +291,47 @@ export default function Studio() {
   const unlockKey = useCallback(async (key: string) => {
     setPaying(true);
     try {
+      // Establish the SiWE session up front so prompt delivery works instantly.
+      await signIn();
       const payRes = await fetch('/api/payment').then((r) => r.json());
       const txHash = await pay(BigInt(payRes.priceWei));
       if (!txHash) return false;
+      // Persist the receipt immediately so a reload can re-verify it on-chain
+      // even if this confirmation poll is interrupted.
+      saveReceipt(key, txHash);
       const v = await verify(txHash, key);
       if (v.ok) {
         setUnlockedKeys((s) => new Set(s).add(key));
         showToast('🔓 Unlocked (verified on-chain)');
         return true;
       }
-      showToast('⚠️ ' + (v.error && v.error !== 'timeout' ? `Payment not accepted: ${v.error}` : 'Confirming payment on-chain… try again in a moment'));
+      showToast('⚠️ ' + (v.error && v.error !== 'timeout' ? `Payment not accepted: ${v.error}` : 'Payment sent — still confirming on-chain. Reload the page (no need to pay again).'));
       return false;
     } finally {
       setPaying(false);
     }
-  }, [pay, verify, showToast]);
+  }, [pay, verify, signIn, showToast]);
 
   const unlockAll = useCallback(async () => {
     setPaying(true);
     try {
+      await signIn();
       const payRes = await fetch('/api/payment').then((r) => r.json());
       const txHash = await pay(BigInt(payRes.priceAllWei));
       if (!txHash) return false;
+      saveReceipt('unlock-all', txHash);
       const v = await verify(txHash, 'unlock-all');
       if (v.ok) {
         setUnlockedAll(true);
         showToast('✅ All prompts unlocked (verified on-chain)');
         return true;
       }
-      showToast('⚠️ ' + (v.error && v.error !== 'timeout' ? `Payment not accepted: ${v.error}` : 'Confirming payment on-chain… try again in a moment'));
+      showToast('⚠️ ' + (v.error && v.error !== 'timeout' ? `Payment not accepted: ${v.error}` : 'Payment sent — still confirming on-chain. Reload the page (no need to pay again).'));
       return false;
     } finally {
       setPaying(false);
     }
-  }, [pay, verify, showToast]);
+  }, [pay, verify, signIn, showToast]);
 
   // ---- per-attempt charged generation (generator + enhancer) ----
   const chargeAndCall = useCallback(async (url: string, extraBody: any): Promise<{ ok: boolean; prompt?: string; error?: string }> => {

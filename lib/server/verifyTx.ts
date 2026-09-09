@@ -4,7 +4,23 @@
 import { createPublicClient, http } from 'viem';
 import { TREASURY, RPC_URL, MIN_CONFIRMATIONS } from './treasury';
 
-const client = createPublicClient({ transport: http(RPC_URL) });
+// Multiple RPC fallbacks — the public Cronos RPC is occasionally flaky, and a
+// single transient failure must not block an already-paid unlock.
+const RPCS = [
+  RPC_URL,
+  process.env.CRONOS_RPC_URL_2 || 'https://cronos-evm.publicnode.com',
+  process.env.CRONOS_RPC_URL_3 || 'https://cronos-rpc.elk.finance',
+].filter(Boolean);
+
+const clients = RPCS.map((u) => createPublicClient({ transport: http(u) }));
+
+async function tryAll<T>(fn: (c: any) => Promise<T>): Promise<T> {
+  let lastErr: any;
+  for (const c of clients) {
+    try { return await fn(c); } catch (e) { lastErr = e; }
+  }
+  throw lastErr;
+}
 
 export interface VerifyResult {
   ok: boolean;
@@ -27,7 +43,7 @@ export async function verifyPaymentTx(
 ): Promise<VerifyResult> {
   let tx: any;
   try {
-    tx = await client.getTransaction({ hash: txHash as `0x${string}` });
+    tx = await tryAll((c) => c.getTransaction({ hash: txHash as `0x${string}` }));
   } catch (e: any) {
     // If the RPC hasn't indexed the transaction yet, treat it as "pending" so
     // the client keeps polling instead of failing outright.
@@ -49,7 +65,7 @@ export async function verifyPaymentTx(
   }
 
   try {
-    const current = await client.getBlockNumber();
+    const current: bigint = await tryAll((c: any) => c.getBlockNumber() as Promise<bigint>);
     const confs = current - tx.blockNumber + 1n;
     if (confs < BigInt(MIN_CONFIRMATIONS)) return { ok: false, pending: true };
   } catch {

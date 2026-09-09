@@ -61,6 +61,14 @@ The unlock ledger uses a portable backend: **Upstash/Vercel KV** if configured
 (persists on serverless hosts), else a **local JSON file** (for hosts with a disk),
 else in-memory. See `lib/server/store.ts`.
 
+**Durable unlocks without a database.** On serverless hosts (Vercel) where the
+ledger is ephemeral, unlocks are additionally backed by the **blockchain itself**:
+after a verified payment the client keeps the transaction hash as a receipt
+(localStorage), and every `/api/unlocks` / `/api/prompt` call re-verifies that
+receipt on-chain (`sender`, `recipient`, `amount`, `confirmations`). The on-chain
+transaction is the permanent proof of payment, so unlocks survive page reloads
+and serverless restarts with no database required.
+
 The treasury address (`lib/server/treasury.ts`) is **server-only** — it is never
 in the UI, never in prompt text, and never in the client bundle (verified at build
 time). Prompts engrave the user's own wallet via the "Your revenue wallet" field.

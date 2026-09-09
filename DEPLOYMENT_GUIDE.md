@@ -147,7 +147,7 @@ Keep these handy — you'll paste them as environment variables below.
 
 | Symptom | Cause / fix |
 |---------|-------------|
-| Unlock works but is gone after refresh | Unlock store isn't persisting — set `KV_REST_API_URL` + `KV_REST_API_TOKEN` and redeploy. |
+| Unlock gone after refresh | Unlocks are backed by the blockchain (client keeps the tx hash as a receipt and re-verifies it on-chain), so this should not happen. If it still does, set `KV_REST_API_URL` + `KV_REST_API_TOKEN` and redeploy for server-side persistence too. |
 | "Switch to Cronos" keeps failing | Your wallet may not have Cronos added — click the chain icon in RainbowKit to add it, or the app auto-adds it. |
 | Wallet modal shows only "Injected" | Normal — set `NEXT_PUBLIC_WALLETCONNECT_PROJECT_ID` for the full connector list. |
 | Build fails with a BigInt error | Node < 18 — use Node 20 (set in `netlify.toml`/host settings). |
