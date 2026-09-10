@@ -2,14 +2,20 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { ConnectButton } from '@rainbow-me/rainbowkit';
-import { useAccount, useChainId, useSwitchChain, useSendTransaction, useSignMessage } from 'wagmi';
+import { useAccount, useChainId, useSendTransaction, useSignMessage } from 'wagmi';
 
-import { cronos } from '@/lib/chains';
+import { PAYMENT_CHAINS } from '@/lib/chains';
 import { CATEGORIES, APPS, REPO_CATEGORIES, REPOS } from '@/lib/data/apps';
 import { YT_GENRES, YT_CHANNELS } from '@/lib/data/youtube';
 import { BRAND_SECTORS, BRANDS } from '@/lib/data/brands';
 import { WEB3_CATEGORIES, WEB3_PROMPTS } from '@/lib/data/web3';
-import { CHAIN_NAMES, EXTRAS } from '@/lib/constants';
+import { CHAIN_NAMES, EXTRAS, NETWORK_OPTIONS } from '@/lib/constants';
+
+const SUPPORTED_CHAIN_IDS = new Set<number>(PAYMENT_CHAINS.map((c) => c.id));
+
+// $AQEL token (public info — shown in the info popup, never the treasury address).
+const AQEL_CONTRACT = '0xeC3Ff43D94B8cF631F62c2E3a201178C0178E11D';
+const AQEL_WOLFSWAP = `https://wolfswap.app/launcher/${AQEL_CONTRACT}?chainId=25`;
 
 const TABS = [
   { id: 'library', label: '📚 Library' },
@@ -46,7 +52,7 @@ function cacheSession(address: string, token: string) {
 // The on-chain transaction is the durable proof of payment. We keep each paid
 // tx hash locally and re-verify it against the chain on every load, so unlocks
 // survive page reloads AND serverless restarts with no database required.
-interface Receipt { key: string; txHash: string; }
+interface Receipt { key: string; txHash: string; chainId?: number; }
 function readReceipts(): Receipt[] {
   try {
     const raw = localStorage.getItem('aq_receipts');
@@ -55,10 +61,10 @@ function readReceipts(): Receipt[] {
     return Array.isArray(a) ? a : [];
   } catch { return []; }
 }
-function saveReceipt(key: string, txHash: string) {
+function saveReceipt(key: string, txHash: string, chainId?: number) {
   try {
     const list = readReceipts().filter((r) => r.key !== key);
-    list.push({ key, txHash });
+    list.push({ key, txHash, chainId });
     localStorage.setItem('aq_receipts', JSON.stringify(list));
   } catch {}
 }
@@ -74,6 +80,44 @@ interface ModalState {
   free?: boolean;
 }
 
+// Multi-select target-network picker (single / multiple / custom).
+function NetworkSelector({ networks, customNetwork, onNetworks, onCustom }: {
+  networks: string[]; customNetwork: string;
+  onNetworks: (n: string[]) => void; onCustom: (s: string) => void;
+}) {
+  const toggle = (id: string) => {
+    if (networks.includes(id)) {
+      const next = networks.filter((x) => x !== id);
+      onNetworks(next.length ? next : ['cronos']);
+    } else {
+      onNetworks([...networks, id]);
+    }
+  };
+  return (
+    <div style={{ width: '100%' }}>
+      <div style={{ fontSize: 12, color: 'var(--muted)', marginBottom: 6 }}>Target network(s) — pick one or many</div>
+      <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
+        {NETWORK_OPTIONS.map((o) => {
+          const on = networks.includes(o.id);
+          return (
+            <button key={o.id} type="button" onClick={() => toggle(o.id)}
+              style={{ background: on ? 'var(--acc)' : 'var(--panel)', border: '1px solid ' + (on ? 'var(--acc)' : 'var(--line)'), color: on ? '#041414' : 'var(--text)', borderRadius: 999, padding: '5px 11px', fontSize: 12, fontWeight: on ? 700 : 400, cursor: 'pointer', display: 'inline-flex', alignItems: 'center', gap: 6 }}>
+              {o.img
+                ? <img src={o.img} alt="" style={{ width: 16, height: 16, borderRadius: '50%', objectFit: 'cover', display: 'block' }} />
+                : <span>{o.emoji}</span>}
+              <span>{o.label}</span>
+            </button>
+          );
+        })}
+      </div>
+      {networks.includes('custom') && (
+        <input placeholder="Custom network name (e.g. 'My L2')" value={customNetwork} onChange={(e) => onCustom(e.target.value)}
+          style={{ marginTop: 8, width: '100%', boxSizing: 'border-box', background: 'var(--panel)', border: '1px solid var(--line)', borderRadius: 12, padding: '9px 14px', color: 'var(--text)' }} />
+      )}
+    </div>
+  );
+}
+
 export default function Studio() {
   // ---- ui state ----
   const [tab, setTab] = useState('library');
@@ -84,6 +128,10 @@ export default function Studio() {
   const [query, setQuery] = useState('');
   const [cat, setCat] = useState('all');
   const [chain, setChain] = useState('cronos');
+  const [networks, setNetworks] = useState<string[]>(['cronos']);
+  const [customNetwork, setCustomNetwork] = useState('');
+  const [nameOverride, setNameOverride] = useState('');
+  const [quote, setQuote] = useState<any>(null);
 
   const [modal, setModal] = useState<ModalState | null>(null);
   const [userWallet, setUserWallet] = useState('');
@@ -91,6 +139,10 @@ export default function Studio() {
   const [unlockedAll, setUnlockedAll] = useState(false);
   const [paying, setPaying] = useState(false);
   const walletDebounce = useRef<any>(null);
+  // Latest-value refs so debounced re-loads always read the freshest options.
+  const networksRef = useRef(networks); networksRef.current = networks;
+  const customNetworkRef = useRef(customNetwork); customNetworkRef.current = customNetwork;
+  const nameOverrideRef = useRef(nameOverride); nameOverrideRef.current = nameOverride;
 
   const [genName, setGenName] = useState('');
   const [genAppId, setGenAppId] = useState('');
@@ -103,9 +155,14 @@ export default function Studio() {
   // ---- wallet ----
   const { address, isConnected } = useAccount();
   const chainId = useChainId();
-  const { switchChainAsync } = useSwitchChain();
   const { sendTransactionAsync } = useSendTransaction();
   const { signMessageAsync } = useSignMessage();
+
+  // Live payment quote for the connected chain (for price labels).
+  useEffect(() => {
+    const cid = chainId || 25;
+    fetch(`/api/payment?chainId=${cid}`).then((r) => r.json()).then(setQuote).catch(() => {});
+  }, [chainId]);
 
   const showToast = useCallback((msg: string) => {
     setToast(msg);
@@ -204,37 +261,40 @@ export default function Studio() {
     return res;
   }, [address, signIn]);
 
-  // ---- payment ----
-  const pay = useCallback(async (priceWei: bigint): Promise<string | null> => {
+  // ---- payment (multi-chain) ----
+  const pay = useCallback(async (which: 'single' | 'all'): Promise<{ hash: string; chainId: number } | null> => {
     if (!address) { showToast('🔒 Connect your wallet first'); return null; }
-    if (chainId !== cronos.id) {
-      try { await switchChainAsync({ chainId: cronos.id }); } catch { showToast('⚠️ Please switch to Cronos in your wallet'); return null; }
+    const cid = chainId || 25;
+    if (!SUPPORTED_CHAIN_IDS.has(cid)) {
+      showToast('⚠️ Switch to a supported network (Cronos, Ethereum, Base, Robinhood, Stable…)');
+      return null;
     }
-    const payRes = await fetch('/api/payment').then((r) => r.json());
+    const payRes = await fetch(`/api/payment?chainId=${cid}`).then((r) => r.json());
+    const value = which === 'all' ? BigInt(payRes.priceAllWei) : BigInt(payRes.priceWei);
     try {
-      // Force the tx onto Cronos (chainId) and return the hash immediately —
-      // the server polls confirmations on its own, so we never block here.
-      const hash = await sendTransactionAsync({ to: payRes.address as `0x${string}`, value: priceWei, chainId: cronos.id });
-      return hash;
+      // Send native tokens on the user's current chain and return the hash
+      // immediately — the server polls confirmations on its own.
+      const hash = await sendTransactionAsync({ to: payRes.address as `0x${string}`, value, chainId: cid as any });
+      return { hash, chainId: cid };
     } catch (e: any) {
       if (e?.message?.includes('rejected') || e?.name === 'UserRejectedRequestError' || e?.code === 4001) {
-        showToast('⚠️ Transaction rejected — no CRO charged');
+        showToast('⚠️ Transaction rejected — nothing charged');
       } else {
         showToast('⚠️ Payment failed: ' + ((e?.shortMessage || e?.message) || 'unknown error'));
       }
       return null;
     }
-  }, [address, chainId, switchChainAsync, sendTransactionAsync, showToast]);
+  }, [address, chainId, sendTransactionAsync, showToast]);
 
   // Poll /api/verify until the tx is confirmed (or a definitive error).
-  const verify = useCallback(async (txHash: string, key: string): Promise<{ ok: boolean; error?: string }> => {
+  const verify = useCallback(async (txHash: string, txChainId: number, key: string): Promise<{ ok: boolean; error?: string }> => {
     const definitive = new Set(['sender mismatch', 'not treasury', 'insufficient payment']);
     for (let i = 0; i < 40; i++) {
       let d: any = { pending: true };
       try {
         const r = await fetch('/api/verify', {
           method: 'POST', headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ txHash, key, address }),
+          body: JSON.stringify({ txHash, key, address, chainId: txChainId }),
         });
         d = await r.json();
       } catch {
@@ -256,7 +316,13 @@ export default function Studio() {
       // on-chain even if its (ephemeral) ledger has no record of the unlock.
       const receipts = readReceipts();
       const res = await authedFetch('/api/prompt', {
-        method: 'POST', body: JSON.stringify({ key, wallet, chain, receipts }),
+        method: 'POST', body: JSON.stringify({
+          key, wallet, chain,
+          networks: networksRef.current,
+          customNetwork: customNetworkRef.current,
+          name: nameOverrideRef.current,
+          receipts,
+        }),
       });
       const d = await res.json();
       if (res.ok && d.prompt) {
@@ -285,6 +351,7 @@ export default function Studio() {
 
   const openFreePrompt = useCallback((w: any) => {
     const c = WEB3_CATEGORIES[w.cat];
+    setNameOverride(''); setNetworks(['cronos']); setCustomNetwork('');
     setModal({ key: 'free:' + w.id, emoji: w.emoji, name: w.name, tag: c.name + ' — free prompt', chips: [c.name, ...w.features.slice(0, 3)], prompt: null, loading: false, free: true });
   }, []);
 
@@ -293,13 +360,12 @@ export default function Studio() {
     try {
       // Establish the SiWE session up front so prompt delivery works instantly.
       await signIn();
-      const payRes = await fetch('/api/payment').then((r) => r.json());
-      const txHash = await pay(BigInt(payRes.priceWei));
-      if (!txHash) return false;
+      const tx = await pay('single');
+      if (!tx) return false;
       // Persist the receipt immediately so a reload can re-verify it on-chain
       // even if this confirmation poll is interrupted.
-      saveReceipt(key, txHash);
-      const v = await verify(txHash, key);
+      saveReceipt(key, tx.hash, tx.chainId);
+      const v = await verify(tx.hash, tx.chainId, key);
       if (v.ok) {
         setUnlockedKeys((s) => new Set(s).add(key));
         showToast('🔓 Unlocked (verified on-chain)');
@@ -316,11 +382,10 @@ export default function Studio() {
     setPaying(true);
     try {
       await signIn();
-      const payRes = await fetch('/api/payment').then((r) => r.json());
-      const txHash = await pay(BigInt(payRes.priceAllWei));
-      if (!txHash) return false;
-      saveReceipt('unlock-all', txHash);
-      const v = await verify(txHash, 'unlock-all');
+      const tx = await pay('all');
+      if (!tx) return false;
+      saveReceipt('unlock-all', tx.hash, tx.chainId);
+      const v = await verify(tx.hash, tx.chainId, 'unlock-all');
       if (v.ok) {
         setUnlockedAll(true);
         showToast('✅ All prompts unlocked (verified on-chain)');
@@ -335,14 +400,13 @@ export default function Studio() {
 
   // ---- per-attempt charged generation (generator + enhancer) ----
   const chargeAndCall = useCallback(async (url: string, extraBody: any): Promise<{ ok: boolean; prompt?: string; error?: string }> => {
-    const payRes = await fetch('/api/payment').then((r) => r.json());
-    const txHash = await pay(BigInt(payRes.priceWei));
-    if (!txHash) return { ok: false, error: 'payment' };
+    const tx = await pay('single');
+    if (!tx) return { ok: false, error: 'payment' };
     const definitive = new Set(['sender mismatch', 'not treasury', 'insufficient payment']);
     for (let i = 0; i < 40; i++) {
       let d: any = { pending: true };
       try {
-        const res = await authedFetch(url, { method: 'POST', body: JSON.stringify({ txHash, ...extraBody }) });
+        const res = await authedFetch(url, { method: 'POST', body: JSON.stringify({ txHash: tx.hash, chainId: tx.chainId, ...extraBody }) });
         d = await res.json();
         if (res.ok && d.prompt) return { ok: true, prompt: d.prompt };
       } catch {
@@ -356,6 +420,7 @@ export default function Studio() {
 
   // ---- open a prompt modal (metadata only; content fetched server-side) ----
   const openPrompt = useCallback((key: string, emoji: string, name: string, tag: string, chips: string[]) => {
+    setNameOverride(''); setNetworks(['cronos']); setCustomNetwork('');
     setModal({ key, emoji, name, tag, chips, prompt: null, loading: false });
   }, []);
 
@@ -437,6 +502,19 @@ export default function Studio() {
       });
     }, 500);
   }, [isUnlocked, loadPrompt, loadFreePrompt]);
+
+  // Debounced re-load when the user edits name / target networks on an open prompt.
+  const scheduleReload = useCallback(() => {
+    if (walletDebounce.current) clearTimeout(walletDebounce.current);
+    walletDebounce.current = setTimeout(() => {
+      setModal((m) => {
+        if (!m) return m;
+        if (m.free) loadFreePrompt(m.key.slice(5), userWallet.trim());
+        else if (isUnlocked(m.key)) loadPrompt(m.key, userWallet.trim());
+        return m;
+      });
+    }, 400);
+  }, [isUnlocked, loadPrompt, loadFreePrompt, userWallet]);
 
   return (
     <>
@@ -618,6 +696,7 @@ export default function Studio() {
               <div className="section-head"><h2>Generate a master build-prompt</h2></div>
               <div style={{ display: 'flex', flexDirection: 'column', gap: 12, maxWidth: 640 }}>
                 <input placeholder="App name (blank = use blueprint name)" value={genName} onChange={(e) => setGenName(e.target.value)} style={{ background: 'var(--panel)', border: '1px solid var(--line)', borderRadius: 12, padding: '10px 14px', color: 'var(--text)' }} />
+                <NetworkSelector networks={networks} customNetwork={customNetwork} onNetworks={setNetworks} onCustom={setCustomNetwork} />
                 <input placeholder="Your revenue wallet (engraved into the prompt)" value={userWallet} onChange={(e) => onWalletInput(e.target.value)} style={{ background: 'var(--panel)', border: '1px solid var(--line)', borderRadius: 12, padding: '10px 14px', color: 'var(--text)', fontFamily: 'monospace' }} />
                 <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8 }}>
                   {EXTRAS.map((x) => (
@@ -636,11 +715,13 @@ export default function Studio() {
                     extras: genExtras,
                     wallet: userWallet.trim(),
                     chain,
+                    networks,
+                    customNetwork,
                   });
                   setPaying(false);
-                  if (r.ok) { setGenOutput(r.prompt || ''); showToast('✅ Paid 1 CRO · prompt generated'); }
+                  if (r.ok) { setGenOutput(r.prompt || ''); showToast('✅ Paid · prompt generated'); }
                   else showToast('⚠️ Payment not verified — no prompt generated');
-                }}>{paying ? '⏳ Paying 1 CRO…' : '⬡ Generate (1 CRO)'}</button>
+                }}>{paying ? '⏳ Paying…' : `⬡ Generate (${quote?.priceLabel || '1 CRO'})`}</button>
               </div>
               {genOutput && <div className="prompt-box" style={{ marginTop: 16, maxHeight: 60 + 'vh' }}>{genOutput}</div>}
             </section>
@@ -657,9 +738,9 @@ export default function Studio() {
               setPaying(true);
               const r = await chargeAndCall('/api/enhance', { text: enhInput, wallet: userWallet.trim(), chain });
               setPaying(false);
-              if (r.ok) { setEnhOutput(r.prompt || ''); showToast('✅ Paid 1 CRO · prompt enhanced'); }
+              if (r.ok) { setEnhOutput(r.prompt || ''); showToast('✅ Paid · prompt enhanced'); }
               else showToast('⚠️ Payment not verified — no prompt generated');
-            }}>{paying ? '⏳ Paying 1 CRO…' : '✨ Enhance (1 CRO)'}</button>
+            }}>{paying ? '⏳ Paying…' : `✨ Enhance (${quote?.priceLabel || '1 CRO'})`}</button>
             {enhOutput && <div className="prompt-box" style={{ marginTop: 16 }}>{enhOutput}</div>}
           </div>
         )}
@@ -701,14 +782,14 @@ export default function Studio() {
               {!modal.free && !isUnlocked(modal.key) ? (
                 <div className="paywall">
                   <h3>🔒 This prompt is locked</h3>
-                  <p>Pay <b>1 CRO</b> on Cronos to unlock this master build-prompt — verified on-chain before it opens.</p>
+                  <p>Pay <b>{quote?.priceLabel || '1 CRO'}</b> on {quote?.chainName || 'Cronos'} to unlock this master build-prompt — verified on-chain before it opens. Pay on any network.</p>
                   <div className="actions" style={{ justifyContent: 'center' }}>
                     <button className="btn primary" disabled={paying || !isConnected} onClick={async () => { const ok = await unlockKey(modal.key); if (ok) loadPrompt(modal.key, userWallet.trim()); }}>
-                      {paying ? '⏳ Paying 1 CRO…' : '🔓 Unlock (1 CRO)'}
+                      {paying ? '⏳ Paying…' : `🔓 Unlock (${quote?.priceLabel || '1 CRO'})`}
                     </button>
                     {!unlockedAll && (
                       <button className="btn mint" disabled={paying || !isConnected} onClick={async () => { const ok = await unlockAll(); if (ok) loadPrompt(modal.key, userWallet.trim()); }}>
-                        {paying ? '⏳ Paying 100 CRO…' : '⬡ Unlock All (100 CRO)'}
+                        {paying ? '⏳ Paying…' : `⬡ Unlock All (${quote?.priceAllLabel || '100 CRO'})`}
                       </button>
                     )}
                   </div>
@@ -717,6 +798,14 @@ export default function Studio() {
               ) : (
                 <>
                   <div className="wallet-row">
+                    <label>App name (blank = use the blueprint name)</label>
+                    <input placeholder={modal.name} value={nameOverride} onChange={(e) => { setNameOverride(e.target.value); scheduleReload(); }} />
+                  </div>
+                  <div className="wallet-row" style={{ marginTop: 10 }}>
+                    <label>Target network(s)</label>
+                    <NetworkSelector networks={networks} customNetwork={customNetwork} onNetworks={(n) => { setNetworks(n); scheduleReload(); }} onCustom={(s) => { setCustomNetwork(s); scheduleReload(); }} />
+                  </div>
+                  <div className="wallet-row" style={{ marginTop: 10 }}>
                     <label>Your revenue wallet</label>
                     <input placeholder="Engrave your wallet into the prompt (optional)" value={userWallet} onChange={(e) => onWalletInput(e.target.value)} />
                   </div>
@@ -743,10 +832,45 @@ export default function Studio() {
       </button>
       {infoOpen && (
         <div className="info-backdrop" onClick={(e) => { if (e.target === e.currentTarget) setInfoOpen(false); }}>
-          <div className="modal" style={{ width: 'min(480px,100%)' }}>
-            <div className="modal-head"><h2>🐺 Tokenomics / WhitePaper</h2><button className="btn" onClick={() => setInfoOpen(false)}>×</button></div>
+          <div className="modal" style={{ width: 'min(600px,100%)', maxHeight: '92vh', overflowY: 'auto' }}>
+            <div className="modal-head"><h2>🐺 Token &amp; WhitePaper</h2><button className="btn" onClick={() => setInfoOpen(false)}>×</button></div>
             <div className="modal-body">
-              <p className="info-body">Coming Soon — Right After Graduation from the street of Wolfies.</p>
+
+              {/* $AQEL token — live */}
+              <div style={{ background: 'var(--panel)', border: '1px solid var(--line)', borderRadius: 14, padding: 16, marginBottom: 14 }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 10 }}>
+                  <span style={{ width: 44, height: 44, borderRadius: 12, background: 'rgba(45,212,191,0.12)', border: '1px solid rgba(45,212,191,0.3)', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
+                    <img src="/logo-main.png" alt="AQELVYN" style={{ width: 34, height: 34, objectFit: 'contain' }} />
+                  </span>
+                  <div>
+                    <div style={{ fontWeight: 800, fontSize: 17 }}>Aqelvyn <span style={{ color: 'var(--acc)' }}>($AQEL)</span></div>
+                    <div style={{ fontSize: 12, color: 'var(--muted)' }}>LIVE on WolfSwap · Cronos — From Prompt to Power</div>
+                  </div>
+                </div>
+                <div style={{ fontSize: 12, color: 'var(--muted)', marginBottom: 4 }}>Contract address</div>
+                <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+                  <code style={{ flex: 1, background: 'rgba(0,0,0,0.3)', border: '1px solid var(--line)', borderRadius: 10, padding: '8px 10px', fontSize: 12, wordBreak: 'break-all', color: 'var(--text)' }}>{AQEL_CONTRACT}</code>
+                  <button className="btn" onClick={async () => { try { await navigator.clipboard.writeText(AQEL_CONTRACT); showToast('📋 Contract copied'); } catch { showToast('Copy failed'); } }}>📋</button>
+                </div>
+                <a className="discord-btn" style={{ marginTop: 12 }} href={AQEL_WOLFSWAP} target="_blank" rel="noopener noreferrer">
+                  🚀 View live chart on WolfSwap ↗
+                </a>
+              </div>
+
+              {/* live graph (embed) */}
+              <div style={{ marginBottom: 14 }}>
+                <div style={{ fontSize: 12, color: 'var(--muted)', marginBottom: 6 }}>Live chart — WolfSwap</div>
+                <iframe
+                  src={AQEL_WOLFSWAP}
+                  title="AQEL live chart"
+                  style={{ width: '100%', height: 420, border: '1px solid var(--line)', borderRadius: 12, background: '#041414' }}
+                  loading="lazy"
+                  referrerPolicy="no-referrer"
+                />
+                <div style={{ fontSize: 11, color: 'var(--muted)', marginTop: 6 }}>Chart loads here on the deployed site. If it doesn&apos;t appear, use the “View live chart” button above.</div>
+              </div>
+
+              <p className="info-body">Tokenomics / WhitePaper — Coming Soon — Right After Graduation from the street of Wolfies.</p>
               <p className="info-body">Until then, for more info visit the project Discord.</p>
               <a className="discord-btn" href="https://discord.gg/WUxR2w8zM7" target="_blank" rel="noopener noreferrer">
                 <svg viewBox="0 0 24 24" width="22" height="22" fill="currentColor" aria-hidden="true"><path d="M20.317 4.37a19.79 19.79 0 00-4.885-1.515.074.074 0 00-.079.037c-.21.375-.444.865-.608 1.25a18.16 18.16 0 00-5.487 0 12.6 12.6 0 00-.617-1.25.077.077 0 00-.079-.037A19.74 19.74 0 003.677 4.37a.07.07 0 00-.032.027C.533 9.046-.32 13.58.099 18.058a.082.082 0 00.031.056c2.053 1.508 4.041 2.423 5.993 3.03a.078.078 0 00.084-.028c.462-.63.873-1.295 1.226-1.994a.076.076 0 00-.042-.106 13.1 13.1 0 01-1.872-.892.077.077 0 01-.008-.128c.126-.094.252-.192.372-.291a.074.074 0 01.077-.01c3.928 1.793 8.18 1.793 12.062 0a.074.074 0 01.078.009c.12.099.246.198.373.292a.077.077 0 01-.006.128 12.3 12.3 0 01-1.873.891.077.077 0 00-.041.107c.36.698.772 1.363 1.225 1.993a.076.076 0 00.084.028c1.961-.607 3.95-1.522 6.002-3.03a.077.077 0 00.031-.055c.5-5.177-.838-9.674-3.549-13.66a.061.061 0 00-.031-.029zM8.02 15.331c-1.183 0-2.157-1.085-2.157-2.419 0-1.333.956-2.419 2.157-2.419 1.21 0 2.176 1.095 2.157 2.419 0 1.333-.956 2.419-2.157 2.419zm7.975 0c-1.183 0-2.157-1.085-2.157-2.419 0-1.333.955-2.419 2.157-2.419 1.21 0 2.176 1.095 2.157 2.419 0 1.333-.946 2.419-2.157 2.419z" /></svg>

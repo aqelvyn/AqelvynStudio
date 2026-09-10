@@ -1,25 +1,15 @@
 // SERVER-ONLY. Shared on-chain payment verification used by /api/verify and the
-// gated generation endpoints (/api/generate, /api/enhance).
+// gated generation endpoints (/api/generate, /api/enhance). Multi-chain: verifies
+// the transaction on the network it was actually sent on.
 
 import { createPublicClient, http } from 'viem';
-import { TREASURY, RPC_URL, MIN_CONFIRMATIONS } from './treasury';
+import { TREASURY, MIN_CONFIRMATIONS } from './treasury';
+import { chainById } from '../chains';
 
-// Multiple RPC fallbacks — the public Cronos RPC is occasionally flaky, and a
-// single transient failure must not block an already-paid unlock.
-const RPCS = [
-  RPC_URL,
-  process.env.CRONOS_RPC_URL_2 || 'https://cronos-evm.publicnode.com',
-  process.env.CRONOS_RPC_URL_3 || 'https://cronos-rpc.elk.finance',
-].filter(Boolean);
-
-const clients = RPCS.map((u) => createPublicClient({ transport: http(u) }));
-
-async function tryAll<T>(fn: (c: any) => Promise<T>): Promise<T> {
-  let lastErr: any;
-  for (const c of clients) {
-    try { return await fn(c); } catch (e) { lastErr = e; }
-  }
-  throw lastErr;
+function rpcsFor(chainId: number): string[] {
+  const chain = chainById(chainId);
+  if (!chain) return [];
+  return (chain.rpcUrls?.default?.http || []) as string[];
 }
 
 export interface VerifyResult {
@@ -33,14 +23,28 @@ function isNotFound(e: any): boolean {
   return msg.includes('not found') || msg.includes('could not be found') || msg.includes('notfound');
 }
 
-// Verifies that `txHash` is a real Cronos transaction where the sender is
+// Verifies that `txHash` is a real transaction on `chainId` where the sender is
 // `address`, the recipient is the treasury, and the value is >= requiredWei,
 // with >= MIN_CONFIRMATIONS confirmations.
 export async function verifyPaymentTx(
   txHash: string,
   address: string,
   requiredWei: bigint,
+  chainId: number = 25,
 ): Promise<VerifyResult> {
+  const rpcs = rpcsFor(chainId);
+  if (rpcs.length === 0) return { ok: false, error: 'unsupported chain' };
+
+  const clients = rpcs.map((u) => createPublicClient({ transport: http(u) }));
+
+  async function tryAll<T>(fn: (c: any) => Promise<T>): Promise<T> {
+    let lastErr: any;
+    for (const c of clients) {
+      try { return await fn(c); } catch (e) { lastErr = e; }
+    }
+    throw lastErr;
+  }
+
   let tx: any;
   try {
     tx = await tryAll((c) => c.getTransaction({ hash: txHash as `0x${string}` }));

@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server';
 import { createHmac } from 'crypto';
-import { VERIFY_SECRET, PRICE_WEI, PRICE_ALL_WEI } from '@/lib/server/treasury';
+import { VERIFY_SECRET } from '@/lib/server/treasury';
+import { priceWeiFor, priceAllWeiFor } from '@/lib/server/treasury';
 import { verifyPaymentTx } from '@/lib/server/verifyTx';
 import { setUnlock } from '@/lib/server/store';
 
@@ -17,8 +18,8 @@ function rateLimited(key: string, max: number, windowMs: number): boolean {
   return cur.count > max;
 }
 
-// POST { txHash, key, address } -> verifies the Cronos tx on-chain and records
-// the unlock server-side. Returns { verified, token } or { verified: false }.
+// POST { txHash, key, address, chainId } -> verifies the tx on-chain (on the
+// network it was sent on) and records the unlock server-side.
 export async function POST(req: Request) {
   const ip = req.headers.get('x-forwarded-for') || 'local';
   if (rateLimited(ip, 30, 60_000)) {
@@ -35,6 +36,7 @@ export async function POST(req: Request) {
   const txHash: string = (body?.txHash || '').toString();
   const key: string = (body?.key || '').toString();
   const address: string = (body?.address || '').toString();
+  const chainId: number = parseInt(body?.chainId || '25', 10) || 25;
 
   if (!/^0x[0-9a-fA-F]{64}$/.test(txHash)) {
     return NextResponse.json({ verified: false });
@@ -46,10 +48,10 @@ export async function POST(req: Request) {
     return NextResponse.json({ verified: false });
   }
 
-  // per-key price: unlock-all costs 100 CRO, everything else 1 CRO.
-  const required = key === 'unlock-all' ? PRICE_ALL_WEI : PRICE_WEI;
+  // per-key price: unlock-all costs 100 CRO-equivalent, everything else 1.
+  const required = key === 'unlock-all' ? priceAllWeiFor(chainId) : priceWeiFor(chainId);
 
-  const v = await verifyPaymentTx(txHash, address, required);
+  const v = await verifyPaymentTx(txHash, address, required, chainId);
   if (!v.ok) {
     return NextResponse.json({ verified: false, pending: !!v.pending, error: v.error });
   }

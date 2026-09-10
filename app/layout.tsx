@@ -27,7 +27,7 @@ export const metadata: Metadata = {
     title: `${SITE_NAME} — AI Prompts, Web3 App Builder & Prompt Library`,
     description: DESCRIPTION,
     locale: 'en_US',
-    images: [{ url: '/og-banner.png', width: 1200, height: 630, alt: `${SITE_NAME} — ${TAGLINE}` }],
+    images: [{ url: `${SITE_URL}/og-banner.png`, width: 1200, height: 630, alt: `${SITE_NAME} — ${TAGLINE}` }],
   },
   twitter: {
     card: 'summary_large_image',
@@ -35,7 +35,7 @@ export const metadata: Metadata = {
     creator: '@aqelvyn',
     title: `${SITE_NAME} — AI Prompts, Web3 App Builder & Prompt Library`,
     description: DESCRIPTION,
-    images: ['/og-banner.png'],
+    images: [`${SITE_URL}/og-banner.png`],
   },
   robots: {
     index: true,

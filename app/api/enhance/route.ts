@@ -1,12 +1,12 @@
 import { NextResponse } from 'next/server';
 import { getSessionAddress } from '@/lib/server/auth';
 import { verifyPaymentTx } from '@/lib/server/verifyTx';
-import { PRICE_WEI } from '@/lib/server/treasury';
+import { priceWeiFor } from '@/lib/server/treasury';
 import { enhancePrompt } from '@/lib/server/prompts';
 
-// POST { txHash, text, wallet, chain }
-// Per-attempt AI Enhancer: verifies a fresh 1 CRO payment, then returns the
-// enhanced prompt.
+// POST { txHash, chainId, text, wallet, chain }
+// Per-attempt AI Enhancer: verifies a fresh 1-CRO-equivalent payment, then
+// returns the enhanced prompt.
 export async function POST(req: Request) {
   const address = getSessionAddress(req);
   if (!address) return NextResponse.json({ error: 'unauthorized' }, { status: 401 });
@@ -20,8 +20,9 @@ export async function POST(req: Request) {
   if (!text.trim()) {
     return NextResponse.json({ error: 'empty prompt' }, { status: 400 });
   }
+  const chainId = parseInt(String(body?.chainId || '25'), 10) || 25;
 
-  const v = await verifyPaymentTx(txHash, address, PRICE_WEI);
+  const v = await verifyPaymentTx(txHash, address, priceWeiFor(chainId), chainId);
   if (!v.ok) {
     return NextResponse.json({ error: v.error || 'not verified', pending: !!v.pending }, { status: 402 });
   }

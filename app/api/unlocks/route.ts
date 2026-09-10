@@ -1,10 +1,10 @@
 import { NextResponse } from 'next/server';
 import { listUnlocks } from '@/lib/server/store';
 import { verifyPaymentTx } from '@/lib/server/verifyTx';
-import { PRICE_WEI, PRICE_ALL_WEI } from '@/lib/server/treasury';
+import { priceWeiFor, priceAllWeiFor } from '@/lib/server/treasury';
 
 // GET /api/unlocks?address=0x... -> server-side ledger unlock list (fast path).
-// POST { address, receipts: [{key, txHash}] } -> re-verifies each payment
+// POST { address, receipts: [{key, txHash, chainId}] } -> re-verifies each payment
 // on-chain (durable proof; works on serverless hosts with no database).
 export async function GET(req: Request) {
   const url = new URL(req.url);
@@ -23,7 +23,7 @@ export async function POST(req: Request) {
   if (!/^0x[0-9a-fA-F]{40}$/.test(address)) {
     return NextResponse.json({ unlocks: [] });
   }
-  const receipts: { key: string; txHash: string }[] = Array.isArray(body?.receipts)
+  const receipts: { key: string; txHash: string; chainId?: number }[] = Array.isArray(body?.receipts)
     ? body.receipts.filter((r: any) => r && r.key && r.txHash)
     : [];
 
@@ -32,8 +32,9 @@ export async function POST(req: Request) {
   for (const r of receipts) {
     if (seen.has(r.key)) continue;
     if (!/^0x[0-9a-fA-F]{64}$/.test(r.txHash)) continue;
-    const required = r.key === 'unlock-all' ? PRICE_ALL_WEI : PRICE_WEI;
-    const v = await verifyPaymentTx(r.txHash, address, required);
+    const chainId = parseInt(String(r.chainId || '25'), 10) || 25;
+    const required = r.key === 'unlock-all' ? priceAllWeiFor(chainId) : priceWeiFor(chainId);
+    const v = await verifyPaymentTx(r.txHash, address, required, chainId);
     if (v.ok) {
       seen.add(r.key);
       unlocks.push({ key: r.key, tx: r.txHash });

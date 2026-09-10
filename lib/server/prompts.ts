@@ -8,11 +8,36 @@ import { BRAND_SECTORS } from '../data/brands';
 import { CHAIN_NAMES } from '../constants';
 import { WEB3_CATEGORIES } from '../data/web3';
 
+// Shared "security as top priority" block — inserted into every master prompt.
+const SECURITY_LINES = [
+  'SECURITY IS THE TOP PRIORITY. The app must be hardened end-to-end before it ships, while keeping every web3 capability intact:',
+  '- Smart contracts: reentrancy guards (CEI pattern + ReentrancyGuard), overflow-checked math, access control (Ownable/RBAC), pause/emergency-withdraw, timelock on admin, and a multisig (2-of-3) for privileged keys.',
+  '- Oracles & external calls: staleness checks, deviation bounds, circuit breakers on extreme moves; never trust unverified external data.',
+  '- Key & wallet security: non-custodial by default; private keys never touch the server; wallet connect only over verified providers; no seed phrases stored or logged.',
+  '- Web app security: OWASP top-10 coverage — authn/authz, CSRF, XSS (output encoding + CSP), SQL injection (parameterized queries), SSRF guards, rate limiting, and secrets in env vars only (never committed).',
+  '- Data & privacy: encryption at rest and in transit (TLS), PII minimization, GDPR-ready consent, and a clear data-deletion path.',
+  '- Testing & audit: unit + integration + fork tests targeting 90%+ coverage, plus a third-party audit checklist, a public bug-bounty policy, and user-facing risk disclosures for every risky action.',
+];
+
+// Build a human-friendly description of the target network(s) for a prompt.
+function networkNames(opts: any): { labels: string[]; hasSolana: boolean } {
+  const keys: string[] =
+    (Array.isArray(opts.networks) && opts.networks.length)
+      ? opts.networks
+      : (opts.chain ? [opts.chain] : ['cronos']);
+  const labels = keys.map((k: string) =>
+    k === 'custom' ? (opts.customNetwork || 'your custom network') : (CHAIN_NAMES[k] || k)
+  );
+  const hasSolana = keys.includes('solana');
+  return { labels, hasSolana };
+}
+
 export function buildMasterPrompt(app: any, opts: any = {}) {
   const cat = CATEGORIES[app.cat];
   const name = opts.name || app.name;
-  const chain = opts.chain || 'cronos';
-  const chainName = CHAIN_NAMES[chain] || chain;
+  const { labels, hasSolana } = networkNames(opts);
+  const chainName = labels.join(', ');
+  const multi = labels.length > 1;
   const tagline = opts.tagline || app.tagline;
   const aiSel = opts.ai || cat.ai;
   const web3Sel = opts.web3 || cat.web3;
@@ -47,7 +72,12 @@ export function buildMasterPrompt(app: any, opts: any = {}) {
   hr();
 
   L.push(`# 4. BLOCKCHAIN & WEB3 — a TRUE web3 app, not a bolt-on`);
-  L.push(`Target network: ${chainName}. Abstract complexity behind a wallet-connector that supports ${chain === 'solana' ? 'Phantom/Solana wallets (SPL tokens, Metaplex NFTs)' : 'EVM wallets via WalletConnect + injected (ERC-20/721/1155, EIP-712 signatures)'}. Key requirements:`);
+  if (multi) {
+    L.push(`Target networks (multi-chain): ${chainName}. Build as a cross-chain app — chain-agnostic contracts deployable to every listed network, with one wallet connector that abstracts all of them.`);
+  } else {
+    L.push(`Target network: ${chainName}.`);
+  }
+  L.push(`Abstract complexity behind a wallet-connector that supports ${hasSolana ? 'EVM wallets (WalletConnect + injected) AND Solana/Phantom wallets (SPL tokens, Metaplex NFTs)' : 'EVM wallets via WalletConnect + injected (ERC-20/721/1155, EIP-712 signatures)'}. Key requirements:`);
   web3Sel.forEach((x: string) => L.push(`- ${x}`));
   L.push(`- Non-custodial by default; users own their assets, identity, and data. Private keys never touch your server.`);
   L.push(`- Gas-free UX where possible (meta-transactions / relayers / L2), with transparent fee previews.`);
@@ -65,28 +95,32 @@ export function buildMasterPrompt(app: any, opts: any = {}) {
   }
   hr();
 
-  L.push(`# 6. DESIGN SYSTEM`);
+  L.push(`# 6. SECURITY (top priority)`);
+  SECURITY_LINES.forEach((s: string) => L.push(s));
+  hr();
+
+  L.push(`# 7. DESIGN SYSTEM`);
   L.push(`- Dark-first futuristic theme with light mode; CSS variables; glassmorphism panels; gradient accents (teal→orange).`);
   L.push(`- Component library (buttons, cards, modals, toasts, tables, charts) + design tokens; fully responsive & accessible (WCAG AA).`);
   L.push(`- Micro-interactions, skeleton loaders, empty states, error states, and a delightful loading experience.`);
   hr();
 
-  L.push(`# 7. TECH STACK`);
+  L.push(`# 8. TECH STACK`);
   L.push(`- Frontend: React + TypeScript + Vite + Tailwind, or Next.js (App Router).`);
   L.push(`- Backend: Node.js (NestJS/Fastify) or serverless; Postgres + Prisma/Drizzle; Redis for cache/queues; S3-compatible storage.`);
   L.push(`- Realtime: WebSockets (or Socket.io) for live features; push via FCM/APNs.`);
   L.push(`- AI: OpenAI-compatible LLM + embeddings (pgvector); optional RAG over user data.`);
-  L.push(`- Web3: ethers.js / viem ${chain === 'solana' ? '+ @solana/web3.js + Metaplex' : ''}; smart contracts in Solidity (or Rust/Anchor if Solana) with full test coverage (Hardhat/Foundry).`);
+  L.push(`- Web3: ethers.js / viem ${hasSolana ? '+ @solana/web3.js + Metaplex' : ''}; smart contracts in Solidity (or Rust/Anchor if Solana) with full test coverage (Hardhat/Foundry).`);
   L.push(`- Infra: Docker, CI/CD, monitoring (Sentry, Grafana), and a hosted preview URL.`);
   hr();
 
   if (extras.length) {
-    L.push(`# 8. CUSTOMIZATION EXTRAS`);
+    L.push(`# 9. CUSTOMIZATION EXTRAS`);
     extras.forEach((x: string) => L.push(`- ${x}`));
     hr();
   }
 
-  L.push(`# ${extras.length ? '9' : '8'}. DELIVERABLES & ACCEPTANCE CRITERIA`);
+  L.push(`# ${extras.length ? '10' : '9'}. DELIVERABLES & ACCEPTANCE CRITERIA`);
   L.push(`1. Fully working, deployable codebase with README, env.example, and seed data.`);
   L.push(`2. Working demo of every feature listed above, including AI execution and on-chain flows.`);
   L.push(`3. Smart contracts deployed to a testnet with verified source and a write-up of the token economics.`);
@@ -97,7 +131,8 @@ export function buildMasterPrompt(app: any, opts: any = {}) {
 }
 
 export function buildRepoPrompt(repo: any, opts: any = {}) {
-  const chainName = CHAIN_NAMES[opts.chain || 'cronos'] || opts.chain || 'Cronos';
+  const { labels } = networkNames(opts);
+  const chainName = labels.join(', ');
   const rc = REPO_CATEGORIES[repo.cat];
   const L: string[] = [];
   L.push(`You are a world-class senior full-stack engineer. Integrate the open-source project "${repo.name}" (github.com/${repo.slug}) — a leading ${rc.name.toLowerCase()} tool — as a core building block of a production-grade app. Treat this spec as the single source of truth.`);
@@ -118,7 +153,12 @@ export function buildRepoPrompt(repo: any, opts: any = {}) {
   L.push(`- On-chain where relevant: target ${chainName}; log build/config provenance and revenue events on-chain.`);
   if (opts.wallet) L.push(`- Route all revenue to treasury wallet: ${opts.wallet}.`);
   L.push(``);
-  L.push(`# 4. DELIVERABLES`);
+  L.push(`# 4. SECURITY (top priority)`);
+  L.push(`- Harden the integration end-to-end: secrets in env vars only, dependency pinning + SBOM, least-privilege API keys, and a patching policy.`);
+  L.push(`- If the repo involves contracts or signing: reentrancy guards, overflow-checked math, access control, and a multisig for admin keys.`);
+  L.push(`- Add automated SAST/dependency scanning, a security review checklist, and rate limiting on anything public-facing.`);
+  L.push(``);
+  L.push(`# 5. DELIVERABLES`);
   L.push(`1. Working app with ${repo.name} integrated, deployable (README + env.example). 2. A concise "how it fits the architecture" write-up. 3. Config as code, CI, and tests. 4. Version/upgrade path and pinned versions. Build completely — no placeholders.`);
   return L.join('\n');
 }
@@ -220,7 +260,8 @@ export function buildBrandPrompt(opts: any) {
   const br = opts.brand || null;
   const name = opts.name || (br ? br.name : 'My Brand');
   const goal = opts.goal || 'engagement';
-  const chainName = CHAIN_NAMES[opts.chain || 'cronos'] || opts.chain || 'Cronos';
+  const { labels } = networkNames(opts);
+  const chainName = labels.join(', ');
   const L: string[] = [];
   const push = (s: string) => L.push(s);
 
@@ -249,7 +290,12 @@ export function buildBrandPrompt(opts: any) {
   push(`- Pluggable LLM provider (OpenAI-compatible) + on-device privacy-preserving models for sensitive data; streaming; usage quotas; RAG over the brand's own content/catalog.`);
   push(``);
   push(`# 4. BLOCKCHAIN & WEB3 — a TRUE web3 app, wired to the brand`);
-  push(`Target network: ${chainName}. Abstract complexity behind one wallet connector (EVM via WalletConnect + ${chainName.toLowerCase().includes('solana') ? 'Solana/Phantom' : 'Solana optional'}). Requirements:`);
+  if (labels.length > 1) {
+    push(`Target networks (multi-chain): ${chainName}. Build chain-agnostic contracts deployable to each, behind one wallet connector.`);
+  } else {
+    push(`Target network: ${chainName}.`);
+  }
+  push(`Abstract complexity behind one wallet connector (EVM via WalletConnect + ${chainName.toLowerCase().includes('solana') ? 'Solana/Phantom' : 'Solana optional'}). Requirements:`);
   sec.web3.forEach((x: string) => push(`- ${x}`));
   push(`- Non-custodial by default; users own their identity, assets & data. Gas-free UX (relayers/L2) with transparent fee previews. On-chain proofs for key actions; off-chain data on IPFS/Arweave with content hashes.`);
   push(``);
@@ -262,17 +308,20 @@ export function buildBrandPrompt(opts: any) {
     push(`- REVENUE TREASURY: designate a single treasury wallet for all revenue, hard-coded into the escrow/splitter contract.`);
   }
   push(``);
-  push(`# 6. DESIGN SYSTEM`);
+  push(`# 6. SECURITY (top priority)`);
+  SECURITY_LINES.forEach((s: string) => push(s));
+  push(``);
+  push(`# 7. DESIGN SYSTEM`);
   push(`- Dark-first futuristic theme with light mode; CSS variables; glassmorphism; brand-accurate accent colors; full responsiveness & WCAG AA; micro-interactions, skeleton/empty/error states.`);
   push(`- Preserve the brand's visual identity (logo, typography, palette) so the app feels unmistakably "${name}".`);
   push(``);
-  push(`# 7. TECH STACK`);
+  push(`# 8. TECH STACK`);
   push(`- Frontend: React + TypeScript + Vite/Next.js + Tailwind. Backend: Node.js (NestJS/Fastify) or serverless; Postgres + Prisma; Redis; S3. Realtime: WebSockets. AI: LLM + embeddings (pgvector). Web3: ethers.js/viem + Solidity (Hardhat/Foundry). Docker, CI/CD, monitoring.`);
   push(``);
-  push(`# 8. PRIMARY GOAL — ${goal}`);
+  push(`# 9. PRIMARY GOAL — ${goal}`);
   BRAND_GOALS[goal].forEach((x: string) => push(`- ${x}`));
   push(``);
-  push(`# 9. DELIVERABLES & ACCEPTANCE CRITERIA`);
+  push(`# 10. DELIVERABLES & ACCEPTANCE CRITERIA`);
   push(`1. Fully working, deployable codebase (README, env.example, seed data). 2. Working demo of every feature incl. AI execution and on-chain flows. 3. Smart contracts on testnet (verified) + token-economics write-up. 4. API docs + admin dashboard (incl. revenue-split config). 5. One-pager + roadmap (v1/v2/v3). Build completely — no placeholders or TODOs.`);
   return L.join('\n');
 }
@@ -333,6 +382,10 @@ export function enhancePrompt(raw: string, chain: string, userWallet: string) {
   }
   if (userWallet) {
     out.push(`- REVENUE TREASURY (single source of truth): route 100% of ALL revenue to wallet ${userWallet} on ${CHAIN_NAMES[chain] || chain}; hard-code it into the escrow/splitter contract and surface balance + history in the admin dashboard.`);
+  }
+  if (!has('security|audit|owasp|reentrancy')) {
+    out.push(`\n# SECURITY (top priority)`);
+    SECURITY_LINES.forEach((s: string) => out.push(s));
   }
   if (!has('design|UI|UX|theme')) {
     out.push(`\n# DESIGN SYSTEM\n- Dark-first futuristic theme (light mode too), CSS variables, glassmorphism, gradient accents (teal→orange), full responsiveness, WCAG AA, micro-interactions, skeleton/empty/error states.`);
