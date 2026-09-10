@@ -8,13 +8,21 @@ import { WEB3_CATEGORIES, WEB3_PROMPTS } from './data/web3';
 
 export const SITE_NAME = 'AQELVYN Studio';
 export const SLOGAN = 'From Prompt to Power';
-// Canonical site URL. Resolution order:
-//   1. NEXT_PUBLIC_SITE_URL (set explicitly, e.g. for a custom domain)
-//   2. Vercel's auto-injected VERCEL_URL (so every deploy "just works")
-//   3. fallback default
+// Canonical site URL. Resolution order (most stable first):
+//   1. NEXT_PUBLIC_SITE_URL — set explicitly in Vercel (recommended; points
+//      at your production/custom domain).
+//   2. VERCEL_PROJECT_PRODUCTION_URL — Vercel's stable production URL. Unlike
+//      VERCEL_URL (which is the per-deployment preview URL and EXPIRES), this
+//      stays constant, so og:image and canonicals never break after a preview
+//      deploy is torn down.
+//   3. VERCEL_URL — fallback for non-Vercel or edge cases.
+//   4. hard fallback.
+const VER_PRODUCTION = process.env.VERCEL_PROJECT_PRODUCTION_URL
+  ? `https://${process.env.VERCEL_PROJECT_PRODUCTION_URL}`
+  : '';
 const VERCEL_AUTO = process.env.VERCEL_URL ? `https://${process.env.VERCEL_URL}` : '';
 export const SITE_URL =
-  process.env.NEXT_PUBLIC_SITE_URL || VERCEL_AUTO || 'https://aqelvyn.studio';
+  process.env.NEXT_PUBLIC_SITE_URL || VER_PRODUCTION || VERCEL_AUTO || 'https://aqelvyn.vercel.app';
 export const TAGLINE =
   'One studio to mold any app, brand, or channel into a complete, AI-powered, Web3-native product — built, owned & scaled by you.';
 export const DESCRIPTION =
